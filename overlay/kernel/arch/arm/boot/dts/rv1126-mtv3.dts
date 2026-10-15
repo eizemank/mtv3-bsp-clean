@@ -1,0 +1,1289 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 Zarnitza
+ * Device Tree for Zarnitza MTV3 RV1126-based Board
+ * Combined single-file configuration
+ *
+ * MTV3 REV2 (этот ревью, по аудиту netlist/BOM от 2026-07-07..08):
+ *  P0:
+ *   - wireless-wlan / wireless-bluetooth / &sdio: disabled -> okay
+ *     (в REV1 фиксы заявлены в шапке, но в текст не доехали).
+ *   - &sdio: закрыт незакрытый блочный комментарий после supports-sdio —
+ *     он молча съедал pinctrl-names/pinctrl-0/default-sample-phase.
+ *   - rk809: vcc5-supply был <&vcc_buck5> (цикл на самого себя) -> vcc5v0_sys
+ *     (лог рабочего DTB: "DCDC_REG5: supplied by vcc5v0_sys").
+ *   - &sdio: + vmmc-supply = vcc_3v3_sw2 (VBAT AP6255; R116 снят, питание
+ *     напрямую с VCC_3V3). В старом DTB mmc2 был слинкован только с vcc_1v8.
+ *  P1:
+ *   - vdd_npu/vdd_vepu: окно 725..876 мВ заменено на РАСЧЁТНОЕ 710..858 мВ
+ *     (делитель R38/R41 33K/100K, инжекция 330K, PWM 3.3В через 12K/10K).
+ *     876 мВ на текущих номиналах недостижим. TODO: замерить duty 0%/100%.
+ *   - wifi_host_wake_h: pull_down -> pull_none (на плате внешняя R94 10K
+ *     вверх к VCCIO_WL; внутренний pull-down давал делитель ~1.4В).
+ *  P2:
+ *   - LEDs: ACTIVE_LOW -> ACTIVE_HIGH (NPN low-side Q1..Q3, high = горит).
+ *   - &emmc: возвращён штатный pinctrl (сняты /delete-property/) — иначе
+ *     мультиплекс держится только на наследии от BootROM/U-Boot.
+ *   - rk809_codec: удалён hp-det (GPIO3_C3 — спейр, физического детекта нет,
+ *     плавающий пин случайно переключал тракт).
+ *   - vccio_sd: диапазон сужен до 3.3В fixed (при no-1-8-v широкий диапазон
+ *     оставлял дверь для шторма io-domains "Voltage invalid").
+ *   - удалён неиспользуемый pinctrl camera_pwr_pins (GPIO3_A4).
+ *   - vcc3v3_phy: vin-supply -> vcc_3v3_sw2 (железо: VCC33_LAN <- R144 <- VCC_3V3).
+ *  GMAC (остаётся disabled, только клоки приведены к железу):
+ *   - clock_in_out: "output" -> "input" (PHY_CLKOUT125 -> R129 22R -> GMAC_CLK_M1
+ *     собран; R117 (25МГц от SoC в кварцевый контур PHY) — DNP, у PHY свой Y3).
+ *   - убраны CLK_GMAC_ETHERNET_OUT (+25 МГц) и &clkm1_out_ethernet — выход
+ *     G21 в никуда.
+ *
+ * MTV3 FIX (REV1):
+ *   - &uart0  disabled -> okay   : BT (brcm_patchram_plus) требует /dev/ttyS0;
+ *                                  RTS исключён из pinctrl и отдан wireless-bluetooth,
+ *                                  поэтому rfkill_bt больше не падает с -22.
+ *   - &saradc disabled -> okay   : adc-keys (recovery) сидит на <&saradc 0>.
+ *   - wireless-wlan: + rockchip,grf, + reg_on в pinctrl, clk_wifi = rk808-clkout2.
+ */
+
+/dts-v1/;
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/display/media-bus-format.h>
+#include <dt-bindings/input/input.h>
+#include "rv1126.dtsi"
+
+/ {
+	model = "Zarnitza MTV3";
+	compatible = "zarnitza,rv1126-mtv3", "rockchip,rv1126";
+
+	chosen {
+		bootargs = "console=ttyFIQ0,1500000 root=/dev/mmcblk0p6 rw rootwait";
+		/*
+		 * Прошивка bcmdhd вшита с Android-путями
+		 * (/vendor/etc/firmware/fw_bcmdhd.bin, .../nvram.txt) — на Buildroot
+		 * их нет. Либо положить файлы туда (симлинки на BCM43455/AP6255),
+		 * либо раскомментировать оверрайд ниже (имена сверить с деревом SDK):
+		 * bootargs = "console=ttyFIQ0,1500000 root=/dev/mmcblk0p6 rw rootwait \
+		 *   bcmdhd.firmware_path=/lib/firmware/fw_bcm43455c0_ag.bin \
+		 *   bcmdhd.nvram_path=/lib/firmware/nvram_ap6255.txt";
+		 */
+	};
+
+	memory@0 {
+		device_type = "memory";
+		/* 2x512МБ DDR3 K4B4G1646E = 1ГБ (DDR-лог: Size=1024MB) */
+		reg = <0x0 0x40000000>; /* 1 ГБ; база RV1126 = 0x0 */
+	};
+
+	aliases {
+		ethernet0 = &gmac;
+		mmc0 = &emmc;
+		mmc1 = &sdmmc;
+		mmc2 = &sdio;
+	};
+
+	/*
+	 * ============================================================
+	 * Power Supplies
+	 * ============================================================
+	 */
+
+	/* External 5V input */
+	vcc5v0_sys: vcc5v0-sys-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_sys";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/*
+	 * VDD_NPU: SY8089 + ШИМ PWM0/GPIO0_B6 (схема, лист 14).
+	 * MTV3 REV2: окно = РАСЧЁТ по номиналам платы (FB 0.6В; R38 33K верх,
+	 * R41 100K низ, R44 330K инжекция; PWM 3.3В через R43 12K / R45 10K;
+	 * подтяжка R42 24K к 3.3В): duty0 -> 0.858В, duty100 -> 0.710В.
+	 * 876 мВ НЕДОСТИЖИМ на текущих номиналах — OPP-800МГц (875мВ) не включать
+	 * до респина (R41/R49 100K -> 86.6K даст окно ~0.74..0.89В).
+	 * TODO: подтвердить края вольтметром при duty 0%/100% до включения
+	 * npu-supply/venc-supply.
+	 */
+	vdd_npu: vdd-npu {
+		compatible = "pwm-regulator";
+		pwms = <&pwm0 0 3300 1>;
+		regulator-name = "vdd_npu";
+		regulator-min-microvolt = <710000>;
+		regulator-max-microvolt = <858000>;
+		regulator-init-microvolt = <800000>;
+		regulator-settling-time-up-us = <300>;
+		regulator-always-on;
+		regulator-boot-on;
+		pwm-supply = <&vcc5v0_sys>;
+	};
+
+	/* VDD_VEPU: SY8089 + ШИМ PWM1/GPIO0_B7 (схема, лист 14). Окно — см. vdd_npu */
+	vdd_vepu: vdd-vepu {
+		compatible = "pwm-regulator";
+		pwms = <&pwm1 0 3300 1>;
+		regulator-name = "vdd_vepu";
+		regulator-min-microvolt = <710000>;
+		regulator-max-microvolt = <858000>;
+		regulator-init-microvolt = <800000>;
+		regulator-settling-time-up-us = <300>;
+		regulator-always-on;
+		regulator-boot-on;
+		pwm-supply = <&vcc5v0_sys>;
+	};
+
+	/*
+	 * Ethernet PHY power.
+	 * MTV3 REV2: vin-supply -> vcc_3v3_sw2: в железе VCC33_LAN питается
+	 * через R144 100мОм от VCC_3V3 (выход SWITCH_REG2), не от vcc3v3_pmic.
+	 */
+	vcc3v3_phy: vcc3v3-phy-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3_phy";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_3v3_sw2>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/*
+	 * ============================================================
+	 * User Interface (LEDs, Keys)
+	 * ============================================================
+	 */
+
+	/*
+	 * MTV3 User LEDs.
+	 * MTV3 REV2: полярность ACTIVE_HIGH — драйверы NPN low-side
+	 * (GPIO -> 10K R165..R167 -> база S8050 Q1..Q3, high = горит).
+	 */
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-names = "default";
+		pinctrl-0 = <&user_led_pins>;
+
+		/* BLED_EN = GPIO3_C1 (схема S11) */
+		blue-led {
+			label = "mtv3:blue";
+			gpios = <&gpio3 17 GPIO_ACTIVE_HIGH>;	/* GPIO3_C1 */
+			linux,default-trigger = "mmc1";
+		};
+
+		/* GLED_EN = GPIO3_A0 (схема S12, ball E19) */
+		green-led {
+			label = "mtv3:green";
+			gpios = <&gpio3 0 GPIO_ACTIVE_HIGH>;	/* GPIO3_A0 */
+			linux,default-trigger = "mmc1";
+		};
+
+		/* RLED_EN = GPIO2_B1 (схема S12, ball L20) */
+		red-led {
+			label = "mtv3:red";
+			gpios = <&gpio2 9 GPIO_ACTIVE_HIGH>;	/* GPIO2_B1 */
+			linux,default-trigger = "heartbeat";
+		};
+	};
+
+	/*
+	 * На модуле единственная кнопка — recovery SW1 на SARADC ADC0 (схема S13).
+	 * Кнопка питания — это PMIC RK809 pwrkey (отдельно). Прежние gpio-keys
+	 * сидели на SDMMC0_DET (GPIO0_A3), TSADC_SHUT (GPIO0_A1) и спейр GPIO3_C3 —
+	 * это не кнопки, удалены.
+	 */
+	adc-keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 0>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+
+		recovery-key {
+			label = "recovery";
+			linux,code = <408>; /* KEY_RESTART; назначьте под свою задачу */
+			press-threshold-microvolt = <0>;
+		};
+	};
+
+	/*
+	 * ============================================================
+	 * Audio
+	 * ============================================================
+	 */
+	mtv3_sound: mtv3-sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,mclk-fs = <256>;
+		simple-audio-card,name = "mtv3-audio";
+		simple-audio-card,cpu {
+			sound-dai = <&i2s0_8ch>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&rk809_codec>;
+		};
+	};
+
+	/*
+	 * ============================================================
+	 * Wireless (WiFi/Bluetooth)
+	 * ============================================================
+	 */
+
+	/* WiFi - AP6255 (BCM43455), bcmdhd/rfkill (CONFIG_BCMDHD=y) */
+	wireless-wlan {
+		compatible = "wlan-platdata";
+		rockchip,grf = <&grf>;		/* нужен rfkill_wlan */
+		wifi_chip_type = "ap6255";
+		sdio_vref = <1800>;		/* = страп SDIO_VSEL (R107 10K вверх) */
+		clocks = <&rk809 1>;		/* 32k LPO = rk808-clkout2 (пин 68) */
+		clock-names = "clk_wifi";	/* подтверждено clk_summary: 1/1, 32768 Гц */
+		WIFI,poweren_gpio  = <&gpio0 RK_PA6 GPIO_ACTIVE_HIGH>;	/* WIFI_REG_ON */
+		WIFI,host_wake_irq = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>;	/* WIFI_HOST_WAKE */
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_host_wake_h &wifi_reg_on_h>;
+		status = "disabled";		/* MTV3 REV2: реально включён */
+		/*
+		 * БЕЗ клока clk_wifi clkout2 гасится (clk_disable_unused) -> 32k не идёт
+		 * на AP6255 -> PMU не стартует -> CMD5 timeout / dhd err=-19.
+		 * Проверка: clk_summary -> rk808-clkout2 enable_count >= 1.
+		 */
+	};
+
+	/* Bluetooth - AP6255 module */
+	wireless-bluetooth {
+		compatible = "bluetooth-platdata";
+		uart_rts_gpios = <&gpio1 16 GPIO_ACTIVE_LOW>;	/* GPIO1_C0 - UART0 RTS */
+		pinctrl-names = "default", "rts_gpio";
+		pinctrl-0 = <&uart0_rtsn>;
+		pinctrl-1 = <&uart0_rtsn_gpio>;
+		BT,reset_gpio = <&gpio0 7 GPIO_ACTIVE_HIGH>;	/* GPIO0_A7 - BT_REG_ON */
+		BT,wake_host_irq = <&gpio0 5 GPIO_ACTIVE_HIGH>;	/* GPIO0_A5 - BT Wake Host */
+		status = "disabled";		/* MTV3 REV2: реально включён */
+	};
+};
+
+/*
+ * ============================================================
+ * PMIC (RK809) Configuration
+ * ============================================================
+ */
+&i2c0 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	rk809: pmic@20 {
+		compatible = "rockchip,rk809";
+		reg = <0x20>;
+		interrupt-parent = <&gpio0>;
+		interrupts = <9 8>;
+		#clock-cells = <1>;
+		clock-output-names = "rk808-clkout1", "rk808-clkout2";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pmic_pins>;
+		rockchip,system-power-controller;
+		wakeup-source;
+
+		/* PMIC input supply mappings (VINx pins) */
+		vcc1-supply = <&vcc5v0_sys>;	/* VIN1 -> DCDC_REG1 (vdd_logic) */
+		vcc2-supply = <&vcc5v0_sys>;	/* VIN2 -> DCDC_REG2 (vdd_arm) */
+		vcc3-supply = <&vcc5v0_sys>;	/* VIN3 -> DCDC_REG3 (vcc_ddr) */
+		vcc4-supply = <&vcc5v0_sys>;	/* VIN4 -> DCDC_REG4 (vcc3v3_pmic) */
+		vcc5-supply = <&vcc5v0_sys>;	/* VIN5 -> DCDC_REG5; MTV3 REV2: был цикл на vcc_buck5 */
+		vcc6-supply = <&vcc_buck5>;	/* VIN6 -> LDO_REG1-4 */
+		vcc7-supply = <&vcc5v0_sys>;	/* VIN7 -> LDO_REG5-7 */
+		vcc8-supply = <&vcc3v3_pmic>;	/* VIN8 -> SWITCH_REG2 */
+		vcc9-supply = <&vcc5v0_sys>;	/* VIN9 -> SWITCH_REG1 */
+
+		pwrkey {
+			status = "okay";
+		};
+
+		pinctrl_rk8xx: pinctrl_rk8xx {
+			gpio-controller;
+			#gpio-cells = <2>;
+
+			rk817_slppin_null: rk817_slppin_null {
+				pins = "gpio_slp";
+				function = "pin_fun0";
+			};
+
+			rk817_slppin_slp: rk817_slppin_slp {
+				pins = "gpio_slp";
+				function = "pin_fun1";
+			};
+
+			rk817_slppin_pwrdn: rk817_slppin_pwrdn {
+				pins = "gpio_slp";
+				function = "pin_fun2";
+			};
+
+			rk817_slppin_rst: rk817_slppin_rst {
+				pins = "gpio_slp";
+				function = "pin_fun3";
+			};
+		};
+
+		regulators {
+			vdd_logic: DCDC_REG1 {
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <725000>;
+				regulator-max-microvolt = <1350000>;
+				regulator-ramp-delay = <6001>;
+				regulator-initial-mode = <0x2>;
+				regulator-name = "vdd_logic";
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-microvolt = <800000>;
+				};
+			};
+
+			vdd_arm: DCDC_REG2 {
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <725000>;
+				regulator-max-microvolt = <1350000>;
+				regulator-ramp-delay = <6001>;
+				regulator-initial-mode = <0x2>;
+				regulator-name = "vdd_arm";
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
+			};
+
+			vcc_ddr: DCDC_REG3 {
+				regulator-name = "vcc_ddr";
+				regulator-min-microvolt = <1500000>;
+				regulator-max-microvolt = <1500000>;
+				regulator-initial-mode = <0x2>;
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-state-mem {
+					regulator-on-in-suspend;
+				};
+			};
+
+			vcc3v3_pmic: DCDC_REG4 {
+				regulator-name = "vcc3v3_pmic";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-initial-mode = <0x2>;
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-state-mem {
+					regulator-on-in-suspend;
+				};
+			};
+
+			vcc_buck5: DCDC_REG5 {
+				regulator-name = "vcc_buck5";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-always-on;
+				regulator-boot-on;
+			};
+
+			vcc_0v8_pmu: LDO_REG1 {
+				regulator-name = "vcc_0v8_pmu";
+				regulator-min-microvolt = <800000>;
+				regulator-max-microvolt = <800000>;
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-state-mem {
+					regulator-on-in-suspend;
+				};
+			};
+
+			vcc_1v8_pmu: LDO_REG2 {
+				regulator-name = "vcc_1v8_pmu";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-state-mem {
+					regulator-on-in-suspend;
+				};
+			};
+
+			vdd_0v8: LDO_REG3 {
+				regulator-name = "vdd_0v8";
+				regulator-min-microvolt = <800000>;
+				regulator-max-microvolt = <800000>;
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-microvolt = <800000>;
+				};
+			};
+
+			vcc_1v8: LDO_REG4 {
+				regulator-name = "vcc_1v8";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-state-mem {
+					regulator-on-in-suspend;
+				};
+			};
+
+			vcc_dovdd: LDO_REG5 {
+				regulator-always-on;
+				regulator-name = "vcc_dovdd";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
+			};
+
+			vcc_dvdd: LDO_REG6 {
+				regulator-name = "vcc_dvdd";
+				regulator-min-microvolt = <1200000>;
+				regulator-max-microvolt = <1200000>;
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
+			};
+
+			vcc_avdd: LDO_REG7 {
+				regulator-always-on;
+				regulator-name = "vcc_avdd";
+				regulator-min-microvolt = <2800000>;
+				regulator-max-microvolt = <2800000>;
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
+			};
+
+			/*
+			 * MTV3 REV2: зажат на 3.3В. UHS убран из &sdmmc (no-1-8-v),
+			 * широкий диапазон 1.8..3.3 оставлял дверь для шторма
+			 * io-domains "Voltage invalid" на vccio2.
+			 */
+			vccio_sd: LDO_REG8 {
+				regulator-always-on;
+				regulator-name = "vccio_sd";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
+			};
+
+			vcc3v3_sd: LDO_REG9 {
+				regulator-always-on;
+				regulator-name = "vcc3v3_sd";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
+			};
+
+			vcc5v0_host: SWITCH_REG1 {
+				regulator-always-on;
+				regulator-name = "vcc5v0_host";
+				regulator-min-microvolt = <5000000>;
+				regulator-max-microvolt = <5000000>;
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
+			};
+
+			vcc_3v3_sw2: SWITCH_REG2 {
+				regulator-always-on;
+				regulator-name = "vcc_3v3_sw2";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-boot-on;
+				regulator-state-mem {
+					regulator-on-in-suspend;
+				};
+			};
+		};
+
+		rk809_codec: codec {
+			#sound-dai-cells = <0>;
+			compatible = "rockchip,rk817-codec";
+			clocks = <&cru MCLK_I2S0_TX_OUT2IO>;
+			clock-names = "mclk";
+			assigned-clocks = <&cru MCLK_I2S0_TX_OUT2IO>;
+			assigned-clock-parents = <&cru MCLK_I2S0_TX>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2s0m0_mclk>;
+			hp-volume = <20>;
+			spk-volume = <3>;
+			status = "okay";
+			/*
+			 * MTV3 REV2: hp-det (GPIO3_C3) удалён — спейр без физического
+			 * детекта, плавающий вход переключал тракт случайным образом.
+			 */
+		};
+	};
+};
+
+&pmu_io_domains {
+	status = "okay";
+	pmuio0-supply = <&vcc_1v8_pmu>;
+	pmuio1-supply = <&vcc3v3_pmic>;
+	vccio1-supply = <&vcc_3v3_sw2>;
+	vccio2-supply = <&vccio_sd>;
+	vccio3-supply = <&vcc_1v8>;
+	vccio4-supply = <&vcc_1v8>;
+	vccio5-supply = <&vcc_3v3_sw2>;
+	vccio6-supply = <&vcc_3v3_sw2>;
+	vccio7-supply = <&vcc_1v8>;
+};
+
+/*
+ * ============================================================
+ * CPU/NPU OPP Tables
+ * ============================================================
+ */
+&cpu0 {
+	cpu-supply = <&vdd_arm>;
+};
+
+&npu_opp_table {
+	/* MTV3 NPU OPP configuration optimized for machine vision workloads */
+	opp-200000000 {
+		opp-hz = /bits/ 64 <200000000>;
+		opp-microvolt = <725000>;
+	};
+
+	opp-300000000 {
+		opp-hz = /bits/ 64 <300000000>;
+		opp-microvolt = <750000>;
+	};
+
+	opp-400000000 {
+		opp-hz = /bits/ 64 <400000000>;
+		opp-microvolt = <775000>;
+	};
+
+	opp-500000000 {
+		opp-hz = /bits/ 64 <500000000>;
+		opp-microvolt = <800000>;
+	};
+
+	opp-600000000 {
+		opp-hz = /bits/ 64 <600000000>;
+		opp-microvolt = <825000>;
+	};
+
+	opp-700000000 {
+		opp-hz = /bits/ 64 <700000000>;
+		opp-microvolt = <850000>;
+	};
+
+	/*
+	 * 875 мВ вне окна pwm-regulator на текущих номиналах (max 858 мВ).
+	 * Активировать только после респина R41/R49 -> 86.6K.
+	 */
+	opp-800000000 {
+		opp-hz = /bits/ 64 <800000000>;
+		opp-microvolt = <875000>;
+	};
+};
+
+&cpu0_opp_table {
+	/* MTV3 CPU OPP configuration */
+	opp-408000000 {
+		opp-hz = /bits/ 64 <408000000>;
+		opp-microvolt = <800000>;
+		clock-latency-ns = <40000>;
+	};
+
+	opp-600000000 {
+		opp-hz = /bits/ 64 <600000000>;
+		opp-microvolt = <800000>;
+		clock-latency-ns = <40000>;
+	};
+
+	opp-816000000 {
+		opp-hz = /bits/ 64 <816000000>;
+		opp-microvolt = <850000>;
+		clock-latency-ns = <40000>;
+	};
+
+	opp-1008000000 {
+		opp-hz = /bits/ 64 <1008000000>;
+		opp-microvolt = <925000>;
+		clock-latency-ns = <40000>;
+	};
+
+	opp-1200000000 {
+		opp-hz = /bits/ 64 <1200000000>;
+		opp-microvolt = <975000>;
+		clock-latency-ns = <40000>;
+	};
+
+	opp-1416000000 {
+		opp-hz = /bits/ 64 <1416000000>;
+		opp-microvolt = <1025000>;
+		clock-latency-ns = <40000>;
+	};
+
+	/* Maximum CPU frequency */
+	opp-1512000000 {
+		opp-hz = /bits/ 64 <1512000000>;
+		opp-microvolt = <1075000>;
+		clock-latency-ns = <40000>;
+	};
+};
+
+/*
+ * ============================================================
+ * Storage / Debug Console
+ * ============================================================
+ */
+&emmc {
+	bus-width = <8>;
+	cap-mmc-highspeed;
+	non-removable;
+	no-1-8-v;
+	rockchip,default-sample-phase = <90>;
+	supports-emmc;
+	/*
+	 * MTV3 REV2: /delete-property/ pinctrl снят — мультиплекс держался
+	 * только на наследии BootROM/U-Boot и терялся drive-strength;
+	 * после suspend/resume мог отвалиться. Наследуем штатный pinctrl
+	 * из rv1126.dtsi. Если удаление лечило конкретный конфликт — сообщить.
+	 */
+	status = "okay";
+};
+
+&fiq_debugger {
+	status = "okay";
+	rockchip,baudrate = <1500000>;
+	rockchip,irq-mode-enable = <1>;
+	rockchip,serial-id = <2>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart2m1_xfer>;
+};
+
+&uart2 {
+	status = "disabled";
+};
+
+/* PWM для pwm-regulator VDD_NPU/VDD_VEPU + UART0 для BT */
+&pwm0 {
+	status = "okay";
+};
+
+&pwm1 {
+	status = "okay";
+};
+
+&uart0 {
+	status = "okay";	/* BT (patchram) требует ttyS0 */
+	/*
+	 * RTS (GPIO1_C0/gpio1-16) НЕ отдаём serial-драйверу: иначе ttyS0
+	 * захватывает пин и rfkill_bt падает с -22. RTS управляет
+	 * wireless-bluetooth (pinctrl uart0_rtsn / uart0_rtsn_gpio).
+	 */
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_xfer &uart0_ctsn>;
+};
+
+/* SD Card Slot */
+&sdmmc {
+	status = "okay";
+	bus-width = <4>;
+	cap-mmc-highspeed;
+	cap-sd-highspeed;
+	card-detect-delay = <200>;
+	rockchip,default-sample-phase = <90>;
+	supports-sd;
+	no-1-8-v;
+	broken-cd;
+	/*
+	 * UHS убран: переключение сигналки 1.8В на широкодиапазонном vccio_sd
+	 * вызывало шторм io-domains "Voltage invalid". Только HS/3.3В.
+	 * broken-cd: детект R85 подтянут к коммутируемому VCC3V3_SD (P0 респина).
+	 */
+	vqmmc-supply = <&vccio_sd>;
+	vmmc-supply = <&vcc3v3_sd>;
+};
+
+/*
+ * ============================================================
+ * Networking
+ * ============================================================
+ */
+
+/* WiFi SDIO Interface */
+&sdio {
+	status = "disabled";	/* MTV3 REV2: реально включён (в REV1 остался disabled) */
+	bus-width = <4>;
+	cap-sd-highspeed;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	non-removable;		/* нужно для presence карты (detect программный) */
+	supports-sdio;		/* КРИТИЧНО: ставит RESTRICT_CARD_TYPE_SDIO */
+	/*
+	 * MTV3 REV2: блочный комментарий выше был не закрыт и молча съедал
+	 * следующие три строки (pinctrl + sample-phase). Не повторять.
+	 */
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdio_clk &sdio_cmd &sdio_bus4>;
+	rockchip,default-sample-phase = <90>;	/* устойчивость шины 1.8В */
+	vmmc-supply = <&vcc_3v3_sw2>;	/* VBAT: VCC_3V3 -> (R116 снят) -> VCC_WL, 3.3В */
+	vqmmc-supply = <&vcc_1v8>;	/* VDDIO модуля (VCCIO_WL) = 1.8В через R109; REG_ON рулит rfkill */
+};
+
+&vcc3v3_phy {
+	status = "disabled";
+};
+
+/*
+ * Gigabit Ethernet — остаётся ВЫКЛЮЧЕН до респина (VDDIO PHY не запитан, P0-1).
+ * MTV3 REV2: клоки приведены к железу заранее:
+ *  - clock_in_out = "input": PHY_CLKOUT125 -> R129 22R -> GMAC_CLK_M1 (K21) собран,
+ *    а R117 (25 МГц от G21 в кварцевый контур PHY) — DNP, у PHY свой кварц Y3.
+ *  - CLK_GMAC_ETHERNET_OUT (+ rate 25 МГц) и &clkm1_out_ethernet убраны —
+ *    выход G21 физически в никуда.
+ * При включении на респине: CLKOUT PHY сконфигурировать на 125 МГц
+ * (по умолчанию RTL8211F отдаёт 25 МГц; realtek-драйвер, НЕ ставить
+ * realtek,clkout-disable), добавить max-speed = <100> (межплатные разъёмы),
+ * mdio phy@1 уже верен (страп PHYAD=001 после починки VDDIO).
+ */
+&gmac {
+	status = "disabled";
+	phy-mode = "rgmii";
+	clock_in_out = "input";
+	assigned-clocks = <&cru CLK_GMAC_SRC>, <&cru CLK_GMAC_TX_RX>;
+	assigned-clock-parents = <&cru CLK_GMAC_SRC_M1>, <&cru RGMII_MODE_CLK>;
+	assigned-clock-rates = <125000000>;
+	tx_delay = <0x2a>;
+	rx_delay = <0x1a>;
+	snps,reset-gpio = <&gpio2 16 GPIO_ACTIVE_LOW>;	/* GPIO2_C0 */
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&rgmiim1_miim &rgmiim1_bus2 &rgmiim1_bus4 &rgmiim1_mclkinout>;
+	phy-handle = <&phy>;
+	phy-supply = <&vcc3v3_phy>;
+
+	mdio {
+		compatible = "snps,dwmac-mdio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		phy: ethernet-phy@1 {
+			compatible = "ethernet-phy-ieee802.3-c22";
+			reg = <0x1>;
+		};
+	};
+};
+
+/*
+ * ============================================================
+ * Audio
+ * ============================================================
+ */
+&i2s0_8ch {
+	status = "okay";
+	#sound-dai-cells = <0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2s0m0_sclk_tx &i2s0m0_lrck_tx &i2s0m0_sdi0 &i2s0m0_sdo0>;
+};
+
+/*
+ * ============================================================
+ * NPU / AI Accelerator
+ * ============================================================
+ */
+&npu {
+	status = "okay";
+	npu-supply = <&vdd_npu>;	/* включать после замера окна PWM (см. vdd_npu) */
+};
+
+/*
+ * ============================================================
+ * Sensors and Misc
+ * ============================================================
+ */
+&cpu_tsadc {
+	status = "okay";
+};
+
+&npu_tsadc {
+	status = "okay";
+};
+
+&otp {
+	status = "okay";
+};
+
+&rng {
+	status = "okay";
+};
+
+&ramoops {
+	status = "okay";
+};
+
+&saradc {
+	status = "okay";	/* adc-keys (recovery) на <&saradc 0> */
+	vref-supply = <&vcc_1v8>;
+};
+
+/*
+ * ============================================================
+ * Suspend/Resume
+ * ============================================================
+ */
+&rockchip_suspend {
+	status = "okay";
+	rockchip,sleep-debug-en = <1>;
+	rockchip,sleep-mode-config = <
+		(0
+		| RKPM_SLP_ARMOFF
+		| RKPM_SLP_PMU_PMUALIVE_32K
+		| RKPM_SLP_PMU_DIS_OSC
+		| RKPM_SLP_PMIC_LP
+		)
+	>;
+	rockchip,wakeup-config = <
+		(0
+		| RKPM_GPIO_WKUP_EN
+		)
+	>;
+};
+
+/*
+ * ============================================================
+ * Video Processing
+ * ============================================================
+ */
+&mpp_srv {
+	status = "okay";
+};
+
+&rkvdec {
+	status = "okay";
+};
+
+&rkvdec_mmu {
+	status = "okay";
+};
+
+&rkvenc {
+	//venc-supply = <&vdd_vepu>;	/* включать после замера окна PWM (см. vdd_vepu) */
+	status = "okay";
+};
+
+&rkvenc_mmu {
+	status = "okay";
+};
+
+&vdpu {
+	status = "okay";
+};
+
+&vepu {
+	status = "okay";
+};
+
+&vpu_mmu {
+	status = "okay";
+};
+
+&iep {
+	status = "okay";
+};
+
+&iep_mmu {
+	status = "okay";
+};
+
+&rk_rga {
+	status = "okay";
+};
+
+/*
+ * ============================================================
+ * USB
+ * ============================================================
+ */
+
+/* USB 2.0 PHY0 - OTG port */
+&u2phy0 {
+	status = "okay";
+
+	u2phy_otg: otg-port {
+		status = "okay";
+	};
+};
+
+/*
+ * USB 2.0 PHY1 - Host port
+ * TODO: Enable when carrier board with USB host connector is connected
+ */
+&u2phy1 {
+	status = "disabled";
+
+	u2phy_host: host-port {
+		status = "disabled";
+		phy-supply = <&vcc5v0_host>;
+	};
+};
+
+&usb_host0_ehci {
+	status = "disabled";
+};
+
+&usb_host0_ohci {
+	status = "disabled";
+};
+
+&usbdrd {
+	status = "okay";
+};
+
+&usbdrd_dwc3 {
+	status = "okay";
+	dr_mode = "peripheral";
+};
+
+/* ============================================================
+ * Две камеры OV13850 на MTV3 (RV1126) — ФИНАЛЬНАЯ DTS-конфигурация
+ * ============================================================
+ *
+ * Пины (из схемы MTV3, переведены в RK_Pxy):
+ *   SDA  W19  GPIO1_D2   i2c1 SDA
+ *   SCL  Y21  GPIO1_D3   i2c1 SCL
+ *   PDN1 W20  GPIO1_D4   cam1 powerdown  -> &gpio1 RK_PD4
+ *   PDN2 V20  GPIO1_D5   cam2 powerdown  -> &gpio1 RK_PD5
+ *   XSD1 V19  GPIO1_D6   cam1 reset      -> &gpio1 RK_PD6
+ *   XSD2 U18  GPIO1_D7   cam2 reset      -> &gpio1 RK_PD7
+ *   XVS1 U19  GPIO2_A0   cam1 frame-sync -> &gpio2 RK_PA0  (опционально)
+ *   XVS2 U20  GPIO2_A1   cam2 frame-sync -> &gpio2 RK_PA1  (опционально)
+ *   MIPI_CLK1 GPIO2_A2   xvclk cam1 -> pinctrl mipicsi_clk1 (узел на RK_PA2!)
+ *   MIPI_CLK2 GPIO2_A3   xvclk cam2 -> pinctrl mipicsi_clk0 (узел на RK_PA3!)
+ *
+ *  ВНИМАНИЕ: имена pinctrl-узлов "перевёрнуты" относительно пинов:
+ *   mipicsi_clk0 = <2 RK_PA3 1> -> GPIO2_A3 = MIPI_CLK2 -> cam2
+ *   mipicsi_clk1 = <2 RK_PA2 1> -> GPIO2_A2 = MIPI_CLK1 -> cam1
+ *   Поэтому cam1 использует mipicsi_clk1, cam2 — mipicsi_clk0.
+ *
+ * Камеры:
+ *   Camera 1: OV13850 @ i2c1 0x10 -> csi_dphy0 -> mipi_csi2 -> rkcif
+ *   Camera 2: OV13850 @ i2c1 0x36 -> csi_dphy1 -> rkisp
+ *
+ * Параметры OV13850 (драйвер ov13850.c): xvclk 24MHz (CLK_MIPICSI_OUT),
+ *   2 data-lanes, link-freq 300MHz, supplies avdd/dovdd/dvdd.
+ *
+ *  Осталось проверить (отмечено TODO):
+ *   xvclk pinctrl ПОДТВЕРЖДЁН: mipicsi_clk0=GPIO2_A3, mipicsi_clk1=GPIO2_A2 (func 1)
+ *   XSD1/XSD2: если на камерной плате заведены на XSHUTDOWN сенсора —
+ *   раскомментировать reset-gpios и снять no-op __ov13850_power_off.
+ */
+
+/* ---------------- Сенсоры на i2c1 ---------------- */
+&i2c1 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	ov13850_1: ov13850@10 {
+		compatible = "ovti,ov13850";
+		reg = <0x10>;
+		clocks = <&cru CLK_MIPICSI_OUT>;
+		clock-names = "xvclk";
+		power-domains = <&power RV1126_PD_VI>;
+		pinctrl-names = "rockchip,camera_default";
+		pinctrl-0 = <&mipicsi_clk1>;		/* GPIO2_A2 = MIPI_CLK1 */
+		avdd-supply = <&vcc_avdd>;
+		dovdd-supply = <&vcc_dovdd>;
+		dvdd-supply = <&vcc_dvdd>;
+		pwdn-gpios  = <&gpio1 RK_PD4 GPIO_ACTIVE_HIGH>;	/* PDN1 W20 */
+		// reset-gpios = <&gpio1 RK_PD6 GPIO_ACTIVE_LOW>;	/* XSD1 V19 */
+		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-facing = "back";
+		rockchip,camera-module-name = "OV13850-CAM1";
+		rockchip,camera-module-lens-name = "default";
+
+		port {  
+			ucam_out0: endpoint {
+				remote-endpoint = <&csi_dphy1_input>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+
+	// ov13850_2: ov13850@36 {
+	// 	compatible = "ovti,ov13850";
+	// 	reg = <0x36>;
+	// 	clocks = <&cru CLK_MIPICSI_OUT>;
+	// 	clock-names = "xvclk";
+	// 	power-domains = <&power RV1126_PD_VI>;
+	// 	pinctrl-names = "rockchip,camera_default";
+	// 	pinctrl-0 = <&mipicsi_clk0>;		/* GPIO2_A3 = MIPI_CLK2 */
+	// 	avdd-supply = <&vcc_avdd>;
+	// 	dovdd-supply = <&vcc_dovdd>;
+	// 	dvdd-supply = <&vcc_dvdd>;
+	// 	pwdn-gpios  = <&gpio1 RK_PD5 GPIO_ACTIVE_HIGH>;	/* PDN2 V20 */
+	// 	// reset-gpios = <&gpio1 RK_PD7 GPIO_ACTIVE_LOW>;	/* XSD2 U18 */
+	// 	rockchip,camera-module-index = <1>;
+	// 	rockchip,camera-module-facing = "front";
+	// 	rockchip,camera-module-name = "OV13850-CAM2";
+	// 	rockchip,camera-module-lens-name = "default";
+
+	// 	port {
+	// 		ucam_out1: endpoint {
+	// 			remote-endpoint = <&mipi_in_ucam0>;
+	// 			data-lanes = <1 2>;
+	// 		};
+	// 	};
+	// };
+};
+
+/* ---------------- csi_dphy0 <- cam1, -> mipi_csi2 ---------------- */
+&csi_dphy0 {
+	status = "disabled";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			mipi_in_ucam0: endpoint@1 {
+				reg = <1>;
+				// remote-endpoint = <&ucam_out1>;
+				data-lanes = <1 2>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			csidphy0_out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&mipi_csi2_input>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+/* ---------------- csi_dphy1 <- cam2, -> rkisp_vir0 ---------------- */
+&csi_dphy1 {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			csi_dphy1_input: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&ucam_out0>;
+				data-lanes = <1 2>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			csi_dphy1_output: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&isp_in>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+/* ---------------- mipi_csi2: csi_dphy0 -> rkcif ---------------- */
+&mipi_csi2 {
+	status = "disabled";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			mipi_csi2_input: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&csidphy0_out>;
+				data-lanes = <1 2>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			mipi_csi2_output: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&cif_mipi_in>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+/* ISP CMA buffer для двух камер */
+&isp_reserved {
+	size = <0x5c00000>;
+};
+
+/* ---------------- rkcif (CIF путь cam1) ---------------- */
+&rkcif {
+	status = "disabled";
+};
+
+&rkcif_mipi_lvds {
+	status = "disabled";
+
+	port {
+		cif_mipi_in: endpoint {
+			remote-endpoint = <&mipi_csi2_output>;
+			data-lanes = <1 2>;
+		};
+	};
+};
+
+&rkcif_mipi_lvds_sditf {
+	status = "disabled";
+
+	port {
+		cif_sditf: endpoint {
+			remote-endpoint = <&isp_virt1_in>;
+			data-lanes = <1 2>;
+		};
+	};
+};
+
+/* ---------------- rkisp + virtual ISP ---------------- */
+&rkisp {
+	status = "okay";
+};
+
+&rkisp_mmu {
+	status = "okay";
+};
+
+&rkisp_vir0 {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			isp_in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&csi_dphy1_output>;
+			};
+		};
+	};
+};
+
+&rkisp_vir1 {
+	status = "disabled";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			isp_virt1_in: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&cif_sditf>;
+			};
+		};
+	};
+};
+
+&rkispp {
+	status = "okay";
+	max-input = <2112 1568 30>;
+};
+
+&rkispp_vir0 {
+	status = "okay";
+};
+
+&rkispp_vir1 {
+	status = "disabled";
+};
+
+&rkispp_mmu {
+	status = "okay";
+};
+
+/*
+ * ============================================================
+ * Pin Control
+ * ============================================================
+ */
+&pinctrl {
+	pmic {
+		pmic_pins: pmic-pins {
+			rockchip,pins =
+				/* PMIC_SLEEP */
+				<0 10 1 &pcfg_pull_none>,
+				/* PMIC_INT */
+				<0 9 0 &pcfg_pull_up>;
+		};
+	};
+
+	user-leds {
+		user_led_pins: user-led-pins {
+			rockchip,pins =
+				<3 17 0 &pcfg_pull_none>,	/* GPIO3_C1 - BLED */
+				<3 0 0 &pcfg_pull_none>,	/* GPIO3_A0 - GLED */
+				<2 9 0 &pcfg_pull_none>;	/* GPIO2_B1 - RLED */
+		};
+	};
+
+	wifi {
+		wifi_reg_on_h: wifi-reg-on-h {
+			rockchip,pins =
+				<0 6 0 &pcfg_pull_none>;	/* GPIO0_A6 */
+		};
+
+		/*
+		 * MTV3 REV2: pull_none — на плате внешняя подтяжка R94 10K
+		 * вверх к VCCIO_WL; внутренний pull-down давал делитель ~1.4В
+		 * в серой зоне VIH + постоянную утечку.
+		 */
+		wifi_host_wake_h: wifi-host-wake-h {
+			rockchip,pins =
+				<0 8 0 &pcfg_pull_none>;	/* GPIO0_B0 */
+		};
+	};
+};

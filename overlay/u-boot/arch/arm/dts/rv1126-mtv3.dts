@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2020 Fuzhou Rockchip Electronics Co., Ltd.
+ * Copyright (c) 2024 Zarnitza - MTV3 Board (U-Boot)
+ * RV1126 + RK809-2, eMMC KLMAG2GEAC (16 ГБ)
+ */
+/dts-v1/;
+#include "rv1126.dtsi"
+#include "rv1126-u-boot.dtsi"
+#include <dt-bindings/input/input.h>
+
+/ {
+	model = "Zarnitza MTV3 Board";
+	compatible = "zarnitza,mtv3", "rockchip,rv1126";
+
+	adc-keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 0>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		u-boot,dm-spl;
+		status = "okay";
+
+		volumeup-key {
+			u-boot,dm-spl;
+			linux,code = <KEY_VOLUMEUP>;
+			label = "volume up";
+			press-threshold-microvolt = <0>;
+		};
+
+		menu-key {
+			u-boot,dm-spl;
+			linux,code = <KEY_MENU>;
+			label = "menu";
+			press-threshold-microvolt = <1198828>;
+		};
+	};
+};
+
+
+&pmu_io_domains {
+	status = "okay";
+	pmuio0-supply = <&vcc_1v8>;       /* 1.8В [было vcc_3v3] */
+	pmuio1-supply = <&vcc3v3_sys>;    /* 3.3В [было vcc1v8] */
+	vccio1-supply = <&vcc_3v3>;       /* 3.3В — eMMC/flash */
+	vccio2-supply = <&vccio_sd>;
+	vccio3-supply = <&vcc_1v8>;       /* 1.8В */
+	vccio4-supply = <&vcc_1v8>;       /* 1.8В (сверить) */
+	vccio5-supply = <&vcc_3v3>;       /* 3.3В — RGMII, та же цепь VCC_3V3 */
+	vccio6-supply = <&vcc_3v3>;       /* 3.3В — R21 0Ω->VCC_3V3 (ИСПРАВЛЕНО vs прошлый ответ) */
+	vccio7-supply = <&vcc_1v8>;       /* 1.8В */
+};
+
+&uart2 {
+    clock-frequency = <24000000>;
+    u-boot,dm-spl;
+    pinctrl-names = "default";
+    pinctrl-0 = <&uart2m1_xfer>;   /* ЯВНО m1, как ядро */
+};
+
+
+&sdmmc {
+	bus-width = <4>;
+	cap-mmc-highspeed;
+	cap-sd-highspeed;
+	card-detect-delay = <200>;
+	rockchip,default-sample-phase = <90>;
+	supports-sd;
+	vmmc-supply = <&vcc3v3_sd>;
+	vqmmc-supply = <&vccio_sd>;
+	status = "okay";
+};

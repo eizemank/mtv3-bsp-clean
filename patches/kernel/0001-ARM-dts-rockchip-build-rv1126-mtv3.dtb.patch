@@ -1,0 +1,19 @@
+From 9e1a5c8d2c7bc1382ee8c6436984095bb81f27f6 Mon Sep 17 00:00:00 2001
+From: Zarnitza MTV3 <mtv3-bsp@zarnitza>
+Date: Wed, 29 Jul 2026 11:14:27 +0300
+Subject: [PATCH] ARM: dts: rockchip: build rv1126-mtv3.dtb
+
+Register the Zarnitza MTV3 board device tree (rv1126-mtv3.dts comes from the mtv3-bsp overlay).
+
+diff --git a/arch/arm/boot/dts/Makefile b/arch/arm/boot/dts/Makefile
+index a8ff4b8..ad94034 100644
+--- a/arch/arm/boot/dts/Makefile
++++ b/arch/arm/boot/dts/Makefile
+@@ -879,6 +879,7 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += \
+ 	rv1126-rmsl-ddr3-v1.dtb \
+ 	rv1126-snapshot.dtb \
+ 	rv1126-sphericalipc-ddr3-v10.dtb \
++	rv1126-mtv3.dtb \
+ 	rk3036-evb.dtb \
+ 	rk3036-kylin.dtb \
+ 	rk3066a-bqcurie2.dtb \

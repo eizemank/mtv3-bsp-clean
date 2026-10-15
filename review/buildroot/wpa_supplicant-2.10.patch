@@ -1,0 +1,613 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Zarnitza MTV3 <mtv3-bsp@zarnitza>
+Date: Tue, 14 Oct 2026 13:02:00 +0300
+Subject: [PATCH] package/wpa_supplicant: bump to 2.10 (WPA3/SAE)
+
+Replaces wpa_supplicant 2.6 with 2.10. Not referenced by rockchip_rv1126_rv1109_mtv3_defconfig (no Wi-Fi there); review before applying.
+---
+diff --git a/package/wpa_supplicant/0001-build-re-enable-options-for-libwpa_client.so-and-.patch b/package/wpa_supplicant/0001-build-re-enable-options-for-libwpa_client.so-and-.patch
+new file mode 100644
+index 00000000..156d0e7e
+--- /dev/null
++++ b/package/wpa_supplicant/0001-build-re-enable-options-for-libwpa_client.so-and-.patch
+@@ -0,0 +1,68 @@
++From e6a6a4e3df52cc60425fcd037d3ec68a38f948ce Mon Sep 17 00:00:00 2001
++From: Sergey Matyukevich <geomatsi@gmail.com>
++Date: Sun, 20 Feb 2022 10:12:28 +0300
++Subject: [PATCH] build: re-enable options for libwpa_client.so and wpa_passphrase
++
++Commit a41a29192e5d ("build: Pull common fragments into a build.rules
++file") introduced regression into wpa_supplicant build process. Build
++target libwpa_client.so is not built regardless of whether the option
++CONFIG_BUILD_WPA_CLIENT_SO is set or not. This happens because config
++option is used before it is imported from the configuration file.
++Moving its usage after including build.rules does not help: variable
++ALL is processed by build.rules and further changes are not applied.
++Similarly, option CONFIG_NO_WPA_PASSPHRASE also does not work as
++expected: wpa_passphrase is always built regardless of whether the
++option is set or not.
++
++This commit re-enables options adding both build targets to _all
++dependencies.
++
++Signed-off-by: Sergey Matyukevich <geomatsi@gmail.com>
++---
++ wpa_supplicant/Makefile | 19 ++++++++++++-------
++ 1 file changed, 12 insertions(+), 7 deletions(-)
++
++diff --git a/wpa_supplicant/Makefile b/wpa_supplicant/Makefile
++index cb66defac..e384cc6b8 100644
++--- a/wpa_supplicant/Makefile
+++++ b/wpa_supplicant/Makefile
++@@ -1,24 +1,29 @@
++ BINALL=wpa_supplicant wpa_cli
++ 
++-ifndef CONFIG_NO_WPA_PASSPHRASE
++-BINALL += wpa_passphrase
++-endif
++-
++ ALL = $(BINALL)
++ ALL += systemd/wpa_supplicant.service
++ ALL += systemd/wpa_supplicant@.service
++ ALL += systemd/wpa_supplicant-nl80211@.service
++ ALL += systemd/wpa_supplicant-wired@.service
++ ALL += dbus/fi.w1.wpa_supplicant1.service
++-ifdef CONFIG_BUILD_WPA_CLIENT_SO
++-ALL += libwpa_client.so
++-endif
++ 
++ EXTRA_TARGETS=dynamic_eap_methods
++ 
++ CONFIG_FILE=.config
++ include ../src/build.rules
++ 
+++ifdef CONFIG_BUILD_WPA_CLIENT_SO
+++# add the dependency this way to allow CONFIG_BUILD_WPA_CLIENT_SO
+++# being set in the config which is read by build.rules
+++_all: libwpa_client.so
+++endif
+++
+++ifndef CONFIG_NO_WPA_PASSPHRASE
+++# add the dependency this way to allow CONFIGNO_WPA_PASSPHRASE
+++# being set in the config which is read by build.rules
+++_all: wpa_passphrase
+++endif
+++
++ ifdef LIBS
++ # If LIBS is set with some global build system defaults, clone those for
++ # LIBS_c and LIBS_p to cover wpa_passphrase and wpa_cli as well.
++-- 
++2.35.1
++
+diff --git a/package/wpa_supplicant/50-wpa_supplicant.preset b/package/wpa_supplicant/50-wpa_supplicant.preset
+new file mode 100644
+index 00000000..9af8562c
+--- /dev/null
++++ b/package/wpa_supplicant/50-wpa_supplicant.preset
+@@ -0,0 +1,4 @@
++disable wpa_supplicant@.service
++disable wpa_supplicant-nl80211@.service
++disable wpa_supplicant-wired@.service
++
+diff --git a/package/wpa_supplicant/Config.in b/package/wpa_supplicant/Config.in
+index 58a074fa..92953f69 100644
+--- a/package/wpa_supplicant/Config.in
++++ b/package/wpa_supplicant/Config.in
+@@ -1,6 +1,8 @@
+-config BR2_PACKAGE_WPA_SUPPLICANT
++menuconfig BR2_PACKAGE_WPA_SUPPLICANT
+ 	bool "wpa_supplicant"
+ 	depends on BR2_USE_MMU # fork()
++	select BR2_PACKAGE_LIBOPENSSL_ENABLE_DES if BR2_PACKAGE_LIBOPENSSL
++	select BR2_PACKAGE_LIBOPENSSL_ENABLE_MD4 if BR2_PACKAGE_LIBOPENSSL
+ 	help
+ 	  WPA supplicant for secure wireless networks
+ 
+@@ -29,6 +31,42 @@ config BR2_PACKAGE_WPA_SUPPLICANT_NL80211
+ comment "nl80211 support needs a toolchain w/ threads"
+ 	depends on !BR2_TOOLCHAIN_HAS_THREADS
+ 
++config BR2_PACKAGE_WPA_SUPPLICANT_WEXT
++	bool "Enable wext (deprecated)"
++	default y if !BR2_TOOLCHAIN_HAS_THREADS
++	help
++	  Enable support for wext.  This is the historic wireless API
++	  for Linux, which is now deprecated and in maintenance-only in
++	  the kernel.  It may still be required by out-of-tree drivers.
++
++config BR2_PACKAGE_WPA_SUPPLICANT_WIRED
++	bool "Enable wired support"
++	depends on BR2_TOOLCHAIN_HAS_THREADS # libnl
++	depends on BR2_TOOLCHAIN_HEADERS_AT_LEAST_4_6
++	select BR2_PACKAGE_LIBNL
++	select BR2_PACKAGE_WPA_SUPPLICANT_EAP
++	help
++	  Include the "wired" driver, so the internal IEEE 802.1x
++	  supplicant can be used with Ethernet.  This also enables
++	  support for MACSEC.
++
++comment "wired macsec support needs a toolchain w/ headers >= 4.6"
++	depends on !BR2_TOOLCHAIN_HEADERS_AT_LEAST_4_6
++
++comment "wired support needs a toolchain w/ threads"
++	depends on !BR2_TOOLCHAIN_HAS_THREADS
++
++comment "wpa_supplicant will be useless without at least one driver"
++	depends on !BR2_PACKAGE_WPA_SUPPLICANT_NL80211 && \
++		!BR2_PACKAGE_WPA_SUPPLICANT_WEXT && \
++		!BR2_PACKAGE_WPA_SUPPLICANT_WIRED
++
++config BR2_PACKAGE_WPA_SUPPLICANT_IBSS_RSN
++	bool "Enable IBSS RSN"
++	depends on BR2_PACKAGE_WPA_SUPPLICANT_NL80211
++	help
++	  Enable support for RSN/WPA2 in Ad-Hoc mode.
++
+ config BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT
+ 	bool "Enable AP mode"
+ 	depends on BR2_PACKAGE_WPA_SUPPLICANT_NL80211
+@@ -38,7 +76,7 @@ config BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT
+ 	  set.  This links in parts of hostapd functionality into
+ 	  wpa_supplicant, making it bigger but dispensing the need for
+ 	  a separate hostapd binary in some applications hence being
+-	  smaller overall.
++	  smaller overall.  It also enables support for Wi-Fi Direct.
+ 
+ config BR2_PACKAGE_WPA_SUPPLICANT_WIFI_DISPLAY
+ 	bool "Enable Wi-Fi Display"
+@@ -55,6 +93,13 @@ config BR2_PACKAGE_WPA_SUPPLICANT_MESH_NETWORKING
+ 	  Enable support for open and secured mesh networking
+ 	  (IEEE 802.11s)
+ 
++config BR2_PACKAGE_WPA_SUPPLICANT_OVERRIDES
++	bool "Enable HT/VHT/HE overrides"
++	help
++	  Enable wpa_supplicant overrides for HT, VHT and HE (disable
++	  HT/HT40, mask MCS rates, etc.) in wpa_supplicant
++	  configuration file.
++
+ config BR2_PACKAGE_WPA_SUPPLICANT_AUTOSCAN
+ 	bool "Enable autoscan"
+ 	help
+@@ -63,10 +108,11 @@ config BR2_PACKAGE_WPA_SUPPLICANT_AUTOSCAN
+ config BR2_PACKAGE_WPA_SUPPLICANT_EAP
+ 	bool "Enable EAP"
+ 	help
+-	  Enable support for EAP.
++	  Enable support for EAP, 802.1x/WPA-Enterprise and FILS.
+ 
+ config BR2_PACKAGE_WPA_SUPPLICANT_HOTSPOT
+ 	bool "Enable HS20"
++	select BR2_PACKAGE_WPA_SUPPLICANT_EAP
+ 	help
+ 	  Enable Hotspot 2.0 and IEEE 802.11u interworking
+ 	  functionality.
+@@ -81,8 +127,16 @@ config BR2_PACKAGE_WPA_SUPPLICANT_WPS
+ 	help
+ 	  Enable support for Wi-Fi Protected Setup (WPS).
+ 
++config BR2_PACKAGE_WPA_SUPPLICANT_WPA3
++	bool "Enable WPA3 support"
++	select BR2_PACKAGE_OPENSSL
++	select BR2_PACKAGE_OPENSSL_FORCE_LIBOPENSSL
++	help
++	  Enable WPA3 support including OWE, SAE, DPP
++
+ config BR2_PACKAGE_WPA_SUPPLICANT_CLI
+ 	bool "Install wpa_cli binary"
++	select BR2_PACKAGE_WPA_SUPPLICANT_CTRL_IFACE
+ 	help
+ 	  Install wpa_cli command line utility
+ 
+@@ -100,24 +154,25 @@ config BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE
+ 	help
+ 	  Install wpa_passphrase command line utility.
+ 
+-config BR2_PACKAGE_WPA_SUPPLICANT_DBUS_OLD
+-	bool "Enable support for old DBus control interface"
+-	depends on BR2_PACKAGE_DBUS
++config BR2_PACKAGE_WPA_SUPPLICANT_CTRL_IFACE
++	bool "Enable the Unix-socket control interface"
+ 	help
+-	  Enable support for old DBus control interface
+-	  (fi.epitest.hostap.WPASupplicant).
++	  Enable support for the Unix-socket-based API.
+ 
+-config BR2_PACKAGE_WPA_SUPPLICANT_DBUS_NEW
+-	bool "Enable support for new DBus control interface"
+-	depends on BR2_PACKAGE_DBUS
++config BR2_PACKAGE_WPA_SUPPLICANT_DBUS
++	bool "Enable support for the DBus control interface"
++	depends on BR2_TOOLCHAIN_HAS_THREADS # dbus
++	select BR2_PACKAGE_DBUS
+ 	help
+-	  Enable support for new DBus control interface
+-	  (fi.w1.wpa_supplicant1).
++	  Enable support for the DBus control interface.
++
++comment "dbus support needs a toolchain w/ threads"
++	depends on !BR2_TOOLCHAIN_HAS_THREADS
+ 
+ config BR2_PACKAGE_WPA_SUPPLICANT_DBUS_INTROSPECTION
+ 	bool "Introspection support"
+-	depends on BR2_PACKAGE_WPA_SUPPLICANT_DBUS_NEW
++	depends on BR2_PACKAGE_WPA_SUPPLICANT_DBUS
+ 	help
+-	  Add introspection support for new DBus control interface.
++	  Add introspection support for the DBus control interface.
+ 
+ endif
+diff --git a/package/wpa_supplicant/ifupdown.sh b/package/wpa_supplicant/ifupdown.sh
+new file mode 100644
+index 00000000..569344b6
+--- /dev/null
++++ b/package/wpa_supplicant/ifupdown.sh
+@@ -0,0 +1,49 @@
++#!/bin/sh
++
++# This file is executed by ifupdown in pre-up, post-up, pre-down and
++# post-down phases of network interface configuration.
++
++WPA_SUP_BIN="/usr/sbin/wpa_supplicant"
++
++# run this script only for interfaces which have wpa-conf option
++[ -z "$IF_WPA_CONF" ] && exit 0
++
++# Allow wpa_supplicant interface to be specified via wpa-iface
++# useful for starting wpa_supplicant on one interface of a bridge
++if [ -n "$IF_WPA_IFACE" ]; then
++	WPA_IFACE="$IF_WPA_IFACE"
++else
++	WPA_IFACE="$IFACE"
++fi
++
++WPA_SUP_PIDFILE="/run/wpa_supplicant.${WPA_IFACE}.pid"
++
++do_start () {
++	if [ ! -s "$IF_WPA_CONF" ]; then
++		echo "cannot read contents of $IF_WPA_CONF"
++		exit 1
++	fi
++	WPA_SUP_CONF="-c $IF_WPA_CONF"
++}
++
++case "$MODE" in
++	start)
++		do_start
++		case "$PHASE" in
++			post-up)
++				start-stop-daemon -S -q -x ${WPA_SUP_BIN} \
++				-- -B -i ${WPA_IFACE} ${WPA_SUP_CONF} -P ${WPA_SUP_PIDFILE}
++				;;
++		esac
++		;;
++
++	stop)
++		case "$PHASE" in
++			pre-down)
++				start-stop-daemon -K -p ${WPA_SUP_PIDFILE}
++				;;
++		esac
++		;;
++esac
++
++exit 0
+diff --git a/package/wpa_supplicant/wpa_supplicant.conf b/package/wpa_supplicant/wpa_supplicant.conf
+index 1994a6c7..20e9f7f8 100644
+--- a/package/wpa_supplicant/wpa_supplicant.conf
++++ b/package/wpa_supplicant/wpa_supplicant.conf
+@@ -1,4 +1,4 @@
+-ctrl_interface=/var/run/wpa_supplicant
++#ctrl_interface=/var/run/wpa_supplicant
+ ap_scan=1
+ 
+ network={
+diff --git a/package/wpa_supplicant/wpa_supplicant.hash b/package/wpa_supplicant/wpa_supplicant.hash
+index 96e59556..fcaee0a3 100644
+--- a/package/wpa_supplicant/wpa_supplicant.hash
++++ b/package/wpa_supplicant/wpa_supplicant.hash
+@@ -1,10 +1,3 @@
+ # Locally calculated
+-sha256  b4936d34c4e6cdd44954beba74296d964bc2c9668ecaa5255e499636fe2b1450  wpa_supplicant-2.6.tar.gz
+-sha256  529113cc81256c6178f3c1cf25dd8d3f33e6d770e4a180bd31c6ab7e4917f40b  rebased-v2.6-0001-hostapd-Avoid-key-reinstallation-in-FT-handshake.patch
+-sha256  d86d47ab74170f3648b45b91bce780949ca92b09ab43df065178850ec0c335d7  rebased-v2.6-0002-Prevent-reinstallation-of-an-already-in-use-group-ke.patch
+-sha256  d4535e36739a0cc7f3585e6bcba3c0bb8fc67cb3e729844e448c5dc751f47e81  rebased-v2.6-0003-Extend-protection-of-GTK-IGTK-reinstallation-of-WNM-.patch
+-sha256  793a54748161b5af430dd9de4a1988d19cb8e85ab29bc2340f886b0297cee20b  rebased-v2.6-0004-Prevent-installation-of-an-all-zero-TK.patch
+-sha256  596d4d3b63ea859ed7ea9791b3a21cb11b6173b04c0a14a2afa47edf1666afa6  rebased-v2.6-0006-TDLS-Reject-TPK-TK-reconfiguration.patch
+-sha256  c5a17af84aec2d88c56ce0da2d6945be398fe7cab5c0c340deb30973900c2736  rebased-v2.6-0007-WNM-Ignore-WNM-Sleep-Mode-Response-without-pending-r.patch
+-sha256  c8840d857b9432f3b488113c85c1ff5d4a4b8d81078b7033388dae1e990843b1  rebased-v2.6-0008-FT-Do-not-allow-multiple-Reassociation-Response-fram.patch
+-sha256  3f6ca36d86668d6607389e01cf4766f38aa3b8ab2c144ad132541087b41c061d  README
++sha256  20df7ae5154b3830355f8ab4269123a87affdea59fe74fe9292a91d0d7e17b2f  wpa_supplicant-2.10.tar.gz
++sha256  af01e1d1ee065a1054d20ebe8a78a016f1fb1133b73e6a9d50801b165bb280c7  README
+diff --git a/package/wpa_supplicant/wpa_supplicant.mk b/package/wpa_supplicant/wpa_supplicant.mk
+index 75ecbaa5..afcd6502 100644
+--- a/package/wpa_supplicant/wpa_supplicant.mk
++++ b/package/wpa_supplicant/wpa_supplicant.mk
+@@ -4,39 +4,25 @@
+ #
+ ################################################################################
+ 
+-WPA_SUPPLICANT_VERSION = 2.6
++WPA_SUPPLICANT_VERSION = 2.10
+ WPA_SUPPLICANT_SITE = http://w1.fi/releases
+-WPA_SUPPLICANT_PATCH = \
+-	http://w1.fi/security/2017-1/rebased-v2.6-0001-hostapd-Avoid-key-reinstallation-in-FT-handshake.patch \
+-	http://w1.fi/security/2017-1/rebased-v2.6-0002-Prevent-reinstallation-of-an-already-in-use-group-ke.patch \
+-	http://w1.fi/security/2017-1/rebased-v2.6-0003-Extend-protection-of-GTK-IGTK-reinstallation-of-WNM-.patch \
+-	http://w1.fi/security/2017-1/rebased-v2.6-0004-Prevent-installation-of-an-all-zero-TK.patch \
+-	http://w1.fi/security/2017-1/rebased-v2.6-0006-TDLS-Reject-TPK-TK-reconfiguration.patch \
+-	http://w1.fi/security/2017-1/rebased-v2.6-0007-WNM-Ignore-WNM-Sleep-Mode-Response-without-pending-r.patch \
+-	http://w1.fi/security/2017-1/rebased-v2.6-0008-FT-Do-not-allow-multiple-Reassociation-Response-fram.patch
+ WPA_SUPPLICANT_LICENSE = BSD-3-Clause
+ WPA_SUPPLICANT_LICENSE_FILES = README
++WPA_SUPPLICANT_CPE_ID_VENDOR = w1.fi
+ WPA_SUPPLICANT_CONFIG = $(WPA_SUPPLICANT_DIR)/wpa_supplicant/.config
+ WPA_SUPPLICANT_SUBDIR = wpa_supplicant
+-WPA_SUPPLICANT_DBUS_OLD_SERVICE = fi.epitest.hostap.WPASupplicant
+-WPA_SUPPLICANT_DBUS_NEW_SERVICE = fi.w1.wpa_supplicant1
++WPA_SUPPLICANT_DBUS_SERVICE = fi.w1.wpa_supplicant1
+ WPA_SUPPLICANT_CFLAGS = $(TARGET_CFLAGS) -I$(STAGING_DIR)/usr/include/libnl3/
+ WPA_SUPPLICANT_LDFLAGS = $(TARGET_LDFLAGS)
++WPA_SUPPLICANT_SELINUX_MODULES = networkmanager
+ 
+ # install the wpa_client library
+ WPA_SUPPLICANT_INSTALL_STAGING = YES
+ 
+ WPA_SUPPLICANT_CONFIG_EDITS =
+ 
+-# Add support for simple background scan
+-WPA_SUPPLICANT_CONFIG_SET = CONFIG_BGSCAN_SIMPLE
+-
+ WPA_SUPPLICANT_CONFIG_ENABLE = \
+-	CONFIG_IEEE80211AC \
+-	CONFIG_IEEE80211N \
+-	CONFIG_IEEE80211R \
+ 	CONFIG_INTERNAL_LIBTOMMATH \
+-	CONFIG_DEBUG_FILE \
+ 	CONFIG_MATCH_IFACE
+ 
+ WPA_SUPPLICANT_CONFIG_DISABLE = \
+@@ -55,6 +41,14 @@ else
+ WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_DRIVER_NL80211
+ endif
+ 
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_WEXT),)
++WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_DRIVER_WEXT
++endif
++
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_IBSS_RSN), )
++WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_IBSS_RSN
++endif
++
+ # Trailing underscore on purpose to not enable CONFIG_EAPOL_TEST
+ ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_EAP),y)
+ WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_EAP_
+@@ -63,11 +57,29 @@ ifeq ($(BR2_STATIC_LIBS),y)
+ WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_EAP_TNC
+ endif
+ else
+-WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_EAP
++WPA_SUPPLICANT_CONFIG_DISABLE += \
++	CONFIG_EAP \
++	CONFIG_IEEE8021X_EAPOL \
++	CONFIG_FILS
++endif
++
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_WIRED),y)
++WPA_SUPPLICANT_DEPENDENCIES += host-pkgconf libnl
++WPA_SUPPLICANT_CONFIG_ENABLE += \
++	CONFIG_LIBNL32 \
++	CONFIG_DRIVER_WIRED \
++	CONFIG_MACSEC \
++	CONFIG_DRIVER_MACSEC_LINUX
++else
++WPA_SUPPLICANT_CONFIG_DISABLE += \
++	CONFIG_DRIVER_WIRED \
++	CONFIG_MACSEC \
++	CONFIG_DRIVER_MACSEC_LINUX
+ endif
+ 
+-ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_HOTSPOT),y)
+-WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_HS20 \
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_HOTSPOT),)
++WPA_SUPPLICANT_CONFIG_DISABLE += \
++	CONFIG_HS20 \
+ 	CONFIG_INTERWORKING
+ endif
+ 
+@@ -75,15 +87,34 @@ ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT),y)
+ WPA_SUPPLICANT_CONFIG_ENABLE += \
+ 	CONFIG_AP \
+ 	CONFIG_P2P
++else
++WPA_SUPPLICANT_CONFIG_DISABLE += \
++	CONFIG_AP \
++	CONFIG_P2P
+ endif
+ 
+ ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_WIFI_DISPLAY),y)
+ WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_WIFI_DISPLAY
++else
++WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_WIFI_DISPLAY
+ endif
+ 
+ ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_MESH_NETWORKING),y)
+-WPA_SUPPLICANT_CONFIG_SET += CONFIG_MESH
+-WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_IEEE80211W
++WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_MESH
++else
++WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_MESH
++endif
++
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_OVERRIDES),y)
++WPA_SUPPLICANT_CONFIG_ENABLE += \
++	CONFIG_HT_OVERRIDES \
++	CONFIG_VHT_OVERRIDES \
++	CONFIG_HE_OVERRIDES
++else
++WPA_SUPPLICANT_CONFIG_DISABLE += \
++	CONFIG_HT_OVERRIDES \
++	CONFIG_VHT_OVERRIDES \
++	CONFIG_HE_OVERRIDES
+ endif
+ 
+ ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_AUTOSCAN),y)
+@@ -92,52 +123,60 @@ WPA_SUPPLICANT_CONFIG_ENABLE += \
+ 	CONFIG_AUTOSCAN_PERIODIC
+ endif
+ 
+-ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_WPS),y)
+-WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_WPS
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_WPS),)
++WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_WPS
++endif
++
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_WPA3),y)
++WPA_SUPPLICANT_CONFIG_ENABLE += \
++	CONFIG_DPP \
++	CONFIG_SAE \
++	CONFIG_SAE_PK \
++	CONFIG_OWE
++else
++WPA_SUPPLICANT_CONFIG_DISABLE += \
++	CONFIG_DPP \
++	CONFIG_SAE \
++	CONFIG_SAE_PK \
++	CONFIG_OWE
+ endif
+ 
+ # Try to use openssl if it's already available
+ ifeq ($(BR2_PACKAGE_LIBOPENSSL),y)
+-WPA_SUPPLICANT_DEPENDENCIES += libopenssl
+-WPA_SUPPLICANT_LIBS += $(if $(BR2_STATIC_LIBS),-lcrypto -lz)
++WPA_SUPPLICANT_DEPENDENCIES += host-pkgconf libopenssl
++WPA_SUPPLICANT_LIBS += `$(PKG_CONFIG_HOST_BINARY) --libs openssl`
+ WPA_SUPPLICANT_CONFIG_EDITS += 's/\#\(CONFIG_TLS=openssl\)/\1/'
+ else
+-WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_EAP_PWD
++WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_EAP_PWD CONFIG_EAP_TEAP
+ WPA_SUPPLICANT_CONFIG_EDITS += 's/\#\(CONFIG_TLS=\).*/\1internal/'
+ endif
+ 
+-ifeq ($(BR2_PACKAGE_DBUS),y)
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_CTRL_IFACE),)
++WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_CTRL_IFACE\>
++endif
++
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_DBUS),y)
+ WPA_SUPPLICANT_DEPENDENCIES += host-pkgconf dbus
+ WPA_SUPPLICANT_MAKE_ENV = \
+ 	PKG_CONFIG_SYSROOT_DIR="$(STAGING_DIR)" \
+ 	PKG_CONFIG_PATH="$(STAGING_DIR)/usr/lib/pkgconfig"
+-
+-ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_DBUS_OLD),y)
+-WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_CTRL_IFACE_DBUS=
+-define WPA_SUPPLICANT_INSTALL_DBUS_OLD
+-	$(INSTALL) -m 0644 -D \
+-		$(@D)/wpa_supplicant/dbus/$(WPA_SUPPLICANT_DBUS_OLD_SERVICE).service \
+-		$(TARGET_DIR)/usr/share/dbus-1/system-services/$(WPA_SUPPLICANT_DBUS_OLD_SERVICE).service
+-endef
+-endif
+-
+-ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_DBUS_NEW),y)
+ WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_CTRL_IFACE_DBUS_NEW
+ define WPA_SUPPLICANT_INSTALL_DBUS_NEW
+ 	$(INSTALL) -m 0644 -D \
+-		$(@D)/wpa_supplicant/dbus/$(WPA_SUPPLICANT_DBUS_NEW_SERVICE).service \
+-		$(TARGET_DIR)/usr/share/dbus-1/system-services/$(WPA_SUPPLICANT_DBUS_NEW_SERVICE).service
++		$(@D)/wpa_supplicant/dbus/$(WPA_SUPPLICANT_DBUS_SERVICE).service \
++		$(TARGET_DIR)/usr/share/dbus-1/system-services/$(WPA_SUPPLICANT_DBUS_SERVICE).service
+ endef
+-endif
+ 
+ ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_DBUS_INTROSPECTION),y)
+ WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_CTRL_IFACE_DBUS_INTRO
+ endif
+ 
++else
++WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_CTRL_IFACE_DBUS_NEW
+ endif
+ 
+-ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_DEBUG_SYSLOG),y)
+-WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_DEBUG_SYSLOG
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_DEBUG_SYSLOG),)
++WPA_SUPPLICANT_CONFIG_DISABLE += CONFIG_DEBUG_SYSLOG
+ endif
+ 
+ ifeq ($(BR2_PACKAGE_READLINE),y)
+@@ -145,8 +184,14 @@ WPA_SUPPLICANT_DEPENDENCIES += readline
+ WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_READLINE
+ endif
+ 
++ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_CTRL_IFACE),y)
++define WPA_SUPPLICANT_ENABLE_CTRL_IFACE
++	sed -i '/ctrl_interface/s/^#//g' $(TARGET_DIR)/etc/wpa_supplicant.conf
++endef
++endif
++
+ ifeq ($(BR2_PACKAGE_WPA_SUPPLICANT_WPA_CLIENT_SO),y)
+-WPA_SUPPLICANT_CONFIG_SET += CONFIG_BUILD_WPA_CLIENT_SO
++WPA_SUPPLICANT_CONFIG_ENABLE += CONFIG_BUILD_WPA_CLIENT_SO
+ define WPA_SUPPLICANT_INSTALL_WPA_CLIENT_SO
+ 	$(INSTALL) -m 0644 -D $(@D)/$(WPA_SUPPLICANT_SUBDIR)/libwpa_client.so \
+ 		$(TARGET_DIR)/usr/lib/libwpa_client.so
+@@ -165,9 +210,14 @@ define WPA_SUPPLICANT_CONFIGURE_CMDS
+ 	cp $(@D)/wpa_supplicant/defconfig $(WPA_SUPPLICANT_CONFIG)
+ 	sed -i $(patsubst %,-e 's/^#\(%\)/\1/',$(WPA_SUPPLICANT_CONFIG_ENABLE)) \
+ 		$(patsubst %,-e 's/^\(%\)/#\1/',$(WPA_SUPPLICANT_CONFIG_DISABLE)) \
+-		$(patsubst %,-e '1i%=y',$(WPA_SUPPLICANT_CONFIG_SET)) \
+ 		$(patsubst %,-e %,$(WPA_SUPPLICANT_CONFIG_EDITS)) \
+ 		$(WPA_SUPPLICANT_CONFIG)
++	# set requested configuration options not listed in wpa_s defconfig
++	for s in $(WPA_SUPPLICANT_CONFIG_ENABLE) ; do \
++		if ! grep -q "^$${s}" $(WPA_SUPPLICANT_CONFIG); then \
++			echo "$${s}=y" >> $(WPA_SUPPLICANT_CONFIG) ; \
++		fi \
++	done
+ endef
+ 
+ # LIBS for wpa_supplicant, LIBS_c for wpa_cli, LIBS_p for wpa_passphrase
+@@ -198,7 +248,6 @@ define WPA_SUPPLICANT_INSTALL_DBUS
+ 	$(INSTALL) -m 0644 -D \
+ 		$(@D)/wpa_supplicant/dbus/dbus-wpa_supplicant.conf \
+ 		$(TARGET_DIR)/etc/dbus-1/system.d/wpa_supplicant.conf
+-	$(WPA_SUPPLICANT_INSTALL_DBUS_OLD)
+ 	$(WPA_SUPPLICANT_INSTALL_DBUS_NEW)
+ endef
+ endif
+@@ -207,6 +256,14 @@ define WPA_SUPPLICANT_INSTALL_STAGING_CMDS
+ 	$(WPA_SUPPLICANT_INSTALL_STAGING_WPA_CLIENT_SO)
+ endef
+ 
++ifeq ($(BR2_PACKAGE_IFUPDOWN_SCRIPTS),y)
++define WPA_SUPPLICANT_INSTALL_IFUP_SCRIPTS
++	$(INSTALL) -m 0755 -D package/wpa_supplicant/ifupdown.sh \
++		$(TARGET_DIR)/etc/network/if-up.d/wpasupplicant
++	ln -sf ../if-up.d/wpasupplicant $(TARGET_DIR)/etc/network/if-down.d/wpasupplicant
++endef
++endif
++
+ define WPA_SUPPLICANT_INSTALL_TARGET_CMDS
+ 	$(INSTALL) -m 0755 -D $(@D)/$(WPA_SUPPLICANT_SUBDIR)/wpa_supplicant \
+ 		$(TARGET_DIR)/usr/sbin/wpa_supplicant
+@@ -216,6 +273,8 @@ define WPA_SUPPLICANT_INSTALL_TARGET_CMDS
+ 	$(WPA_SUPPLICANT_INSTALL_PASSPHRASE)
+ 	$(WPA_SUPPLICANT_INSTALL_DBUS)
+ 	$(WPA_SUPPLICANT_INSTALL_WPA_CLIENT_SO)
++	$(WPA_SUPPLICANT_INSTALL_IFUP_SCRIPTS)
++	$(WPA_SUPPLICANT_ENABLE_CTRL_IFACE)
+ endef
+ 
+ define WPA_SUPPLICANT_INSTALL_INIT_SYSTEMD
+@@ -227,6 +286,8 @@ define WPA_SUPPLICANT_INSTALL_INIT_SYSTEMD
+ 		$(TARGET_DIR)/usr/lib/systemd/system/wpa_supplicant-nl80211@.service
+ 	$(INSTALL) -m 0644 -D $(@D)/$(WPA_SUPPLICANT_SUBDIR)/systemd/wpa_supplicant-wired@.service \
+ 		$(TARGET_DIR)/usr/lib/systemd/system/wpa_supplicant-wired@.service
++	$(INSTALL) -D -m 644 $(WPA_SUPPLICANT_PKGDIR)/50-wpa_supplicant.preset \
++		$(TARGET_DIR)/usr/lib/systemd/system-preset/50-wpa_supplicant.preset
+ endef
+ 
+ $(eval $(generic-package))
+-- 
+2.17.1
+

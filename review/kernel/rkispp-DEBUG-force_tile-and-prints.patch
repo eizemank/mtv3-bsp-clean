@@ -1,0 +1,64 @@
+From a453042a1bdb95e125d0e780673a30efbd97d56a Mon Sep 17 00:00:00 2001
+From: Zarnitza MTV3 <mtv3-bsp@zarnitza>
+Date: Wed, 29 Jul 2026 11:14:27 +0300
+Subject: [PATCH] media: rkispp: DEBUG force_tile module parameter and buffer
+ prints
+
+Debug aids from the MTV3 bring-up: force_tile=<ycnt<<8|xcnt> module parameter overriding
+SHP tile counts, pr_info on tile change, pr_err with tmp_yuv DMA address. Not for production.
+
+diff --git a/drivers/media/platform/rockchip/ispp/params.c b/drivers/media/platform/rockchip/ispp/params.c
+index fa41ced..4a46ef7 100644
+--- a/drivers/media/platform/rockchip/ispp/params.c
++++ b/drivers/media/platform/rockchip/ispp/params.c
+@@ -10,6 +10,10 @@
+ #include <linux/rkisp1-config.h>
+ #include "dev.h"
+ #include "regs.h"
++#include <linux/module.h>
++
++static int force_tile = -1;
++module_param(force_tile, int, 0644);
+ 
+ #define RKISP1_ISP_PARAMS_REQ_BUFS_MIN	2
+ #define RKISP1_ISP_PARAMS_REQ_BUFS_MAX	8
+@@ -372,6 +376,18 @@ static void shp_config(struct rkispp_params_vdev *params_vdev,
+ 	rkispp_write(params_vdev->dev, RKISPP_SHARP_SC_DOWN,
+ 		(arg->scl_down_v & 0x1) << 1 | (arg->scl_down_h & 0x1));
+ 
++	if (force_tile >= 0) {
++		arg->tile_ycnt = (force_tile >> 8) & 0x1f;
++		arg->tile_xcnt = force_tile & 0xff;
++	}
++	{
++		static u32 last = 0xffffffff;
++		u32 cur = arg->tile_ycnt << 8 | arg->tile_xcnt;
++		if (cur != last) {
++			pr_info("SHP tile ycnt=%d xcnt=%d\n", arg->tile_ycnt, arg->tile_xcnt);
++			last = cur;
++		}
++	}
+ 	rkispp_write(params_vdev->dev, RKISPP_SHARP_TILE_IDX,
+ 		(arg->tile_ycnt & 0x1F) << 8 | (arg->tile_xcnt & 0xFF));
+ 
+@@ -481,7 +497,7 @@ static void shp_config(struct rkispp_params_vdev *params_vdev,
+ 	      arg->edge_avg_en << 4;
+ 	rkispp_set_bits(params_vdev->dev, RKISPP_SHARP_CORE_CTRL,
+ 			SW_SHP_ALPHA_ADP_EN | SW_SHP_YIN_FLT_EN |
+-			SW_SHP_EDGE_AVG_EN, val);
++			SW_SHP_EDGE_AVG_EN, val);		
+ }
+ 
+ static void shp_enable(struct rkispp_params_vdev *params_vdev, bool en,
+diff --git a/drivers/media/platform/rockchip/ispp/stream.c b/drivers/media/platform/rockchip/ispp/stream.c
+index cea0e67..049fa9e 100644
+--- a/drivers/media/platform/rockchip/ispp/stream.c
++++ b/drivers/media/platform/rockchip/ispp/stream.c
+@@ -1046,6 +1046,7 @@ static int config_nr_shp(struct rkispp_device *dev)
+ 	}
+ 
+ 	val = vdev->nr.buf.tmp_yuv.dma_addr;
++	pr_err("DBG tmp_yuv addr=0x%x size=%u\n", (u32)vdev->nr.buf.tmp_yuv.dma_addr, vdev->nr.buf.tmp_yuv.size);
+ 	rkispp_write(dev, RKISPP_SHARP_TMP_YUV_BASE, val);
+ 
+ 	/* fix to use new nr algorithm */

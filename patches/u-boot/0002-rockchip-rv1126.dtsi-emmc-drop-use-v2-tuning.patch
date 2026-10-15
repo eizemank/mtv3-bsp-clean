@@ -1,0 +1,19 @@
+From d7c31b7b4d2c8ec36aa60aff4b3a95d0923da09b Mon Sep 17 00:00:00 2001
+From: Zarnitza MTV3 <mtv3-bsp@zarnitza>
+Date: Wed, 29 Jul 2026 11:14:27 +0300
+Subject: [PATCH] rockchip: rv1126.dtsi: emmc: drop rockchip,use-v2-tuning
+
+eMMC KLMAG2GEAC on MTV3: disable v2 tuning in the SPL/U-Boot eMMC node.
+
+diff --git a/arch/arm/dts/rv1126.dtsi b/arch/arm/dts/rv1126.dtsi
+index 674ff1a..6598c07 100644
+--- a/arch/arm/dts/rv1126.dtsi
++++ b/arch/arm/dts/rv1126.dtsi
+@@ -1878,7 +1878,6 @@
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&emmc_clk &emmc_cmd &emmc_bus8>;
+ 		power-domains = <&power RV1126_PD_NVM>;
+-		rockchip,use-v2-tuning;
+ 		status = "disabled";
+ 	};
+ 

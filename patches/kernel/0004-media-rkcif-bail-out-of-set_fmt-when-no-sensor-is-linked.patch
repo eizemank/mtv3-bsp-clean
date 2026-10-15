@@ -1,0 +1,23 @@
+From 7811db9e385569af53ff8f10a8266223868955d7 Mon Sep 17 00:00:00 2001
+From: Zarnitza MTV3 <mtv3-bsp@zarnitza>
+Date: Wed, 29 Jul 2026 11:14:27 +0300
+Subject: [PATCH] media: rkcif: bail out of set_fmt when no sensor is linked
+
+With only one of the two MTV3 cameras populated, rkcif_set_fmt dereferenced a NULL sensor; log and return instead.
+
+diff --git a/drivers/media/platform/rockchip/cif/capture.c b/drivers/media/platform/rockchip/cif/capture.c
+index 2925dab..c2830da 100644
+--- a/drivers/media/platform/rockchip/cif/capture.c
++++ b/drivers/media/platform/rockchip/cif/capture.c
+@@ -3260,6 +3260,11 @@ static void rkcif_set_fmt(struct rkcif_stream *stream,
+ 	input_rect.width = RKCIF_DEFAULT_WIDTH;
+ 	input_rect.height = RKCIF_DEFAULT_HEIGHT;
+ 
++	if (!dev->active_sensor || !dev->active_sensor->sd) {
++		v4l2_err(&dev->v4l2_dev, "no sensor linked\n");
++		return;
++	}
++
+ 	if (dev->active_sensor && dev->active_sensor->sd) {
+ 		cif_fmt_in = get_input_fmt(dev->terminal_sensor.sd,
+ 			      &input_rect, stream->id, &vc);

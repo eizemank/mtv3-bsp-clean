@@ -1,0 +1,151 @@
+# Minimal Buildroot configuration for RV1126/RV1109 test device
+# Based on original full-featured configuration but stripped down for basic testing
+
+# Base configuration includes
+#include "base.config"
+#include "base_extra.config" 
+#include "debug.config"
+#include "rv1126_rv1109_arm.config"
+
+# Essential system configuration
+BR2_TARGET_GENERIC_ROOT_PASSWD="zarnitza"
+BR2_TARGET_LOCALTIME="Asia/Shanghai"
+
+# Basic file system overlay (keep minimal)
+BR2_ROOTFS_OVERLAY="board/rockchip/rv1126_rv1109/fs-overlay-sysv/"
+
+# Essential hardware support
+BR2_PACKAGE_RK_OEM=y
+BR2_PACKAGE_RK_OEM_RESOURCE_DIR="$(TOPDIR)/../device/rockchip/oem/oem_mtv3"
+
+# Minimal network support (essential for testing)
+#include "network.config"
+BR2_PACKAGE_CONNMAN=y
+BR2_PACKAGE_CONNMAN_LOOPBACK=y
+
+# Basic utilities
+BR2_PACKAGE_UTIL_LINUX_RFKILL=y
+BR2_PACKAGE_STRESS=y
+BR2_PACKAGE_LIBCAP=y
+BR2_PACKAGE_LIBCAP_TOOLS=y
+
+# Essential database support
+BR2_PACKAGE_SQLITE_STAT3=y
+BR2_PACKAGE_SQLITE_ENABLE_JSON1=y
+
+# Basic time sync
+BR2_PACKAGE_NTP=y
+BR2_PACKAGE_NTP_NTPDATE=y
+
+# Minimal camera support (for hardware validation)
+# v4l-utils: media-ctl (поиск узла) + v4l2-ctl (захват)
+BR2_PACKAGE_LIBV4L=y
+BR2_PACKAGE_LIBV4L_UTILS=y 
+
+# resize2fs: расширить rootfs (p6 застрял на 24M)
+BR2_PACKAGE_E2FSPROGS=y
+BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
+
+# ffmpeg: конвертация сырого NV12 → видеофайл (опционально)
+BR2_PACKAGE_FFMPEG=y
+BR2_PACKAGE_FFMPEG_GPL=y
+
+# Camera engine (rkaiq). Нужен UVC-стеку ниже: BR2_PACKAGE_RKMEDIA_USE_AIQ выбирает
+# BR2_PACKAGE_CAMERA_ENGINE, а тот на RV1126 (ISP2) сам выбирает RKAIQ — выключить его,
+# не выключая rkmedia/ispserver/uvc_app, нельзя. IQ-файл один, под dts: сенсор ov13850,
+# rockchip,camera-module-name = "OV13850-CAM1", lens "default"; для второй камеры добавить
+# через пробел "AVL_isp20/ov13850_OV13850-CAM2_default.xml". Без IQFILE ставятся все */*.xml.
+BR2_PACKAGE_CAMERA_ENGINE=y
+BR2_PACKAGE_CAMERA_ENGINE_RKAIQ=y
+BR2_PACKAGE_CAMERA_ENGINE_RKAIQ_IQFILE="AVL_isp20/ov13850_OV13850-CAM1_default.xml"
+# BR2_PACKAGE_CAMERA_ENGINE_RKAIQ_RKISP_DEMO is not set
+# BR2_PACKAGE_CAMERA_ENGINE_RKAIQ_FORCE_INSTALL_TO_ROOTFS is not set
+BR2_PACKAGE_LINUX_RGA=y
+
+# Basic media support (for testing)
+BR2_PACKAGE_RKMEDIA_MPP=y
+BR2_PACKAGE_RKMEDIA_EXAMPLES=y
+
+# Flash configuration
+BR2_PACKAGE_FLASH_VOL_SEL=y
+
+# USB support (for debugging/data transfer)
+# Note: USB configuration would be included via base configs
+
+# Remove all non-essential components:
+# - No WiFi/BT (unless absolutely needed for testing)
+# - No audio processing
+# - No video streaming
+# - No web interface
+# - No OpenCV
+# - No Qt5
+# - No complex codecs
+# - No OSD/GUI features
+
+# Optional: Add back specific components as needed for your testing:
+# For WiFi testing, uncomment:
+# #include "wifi.config"
+# BR2_PACKAGE_RKWIFIBT_AP6256=y
+# BR2_PACKAGE_RKWIFIBT_BTUART="ttyS0"
+
+# For basic audio testing, uncomment:
+# #include "audio.config"
+# BR2_PACKAGE_RKMEDIA_ALSA=y
+# BR2_PACKAGE_RKMEDIA_ALSA_PLAYBACK=y
+
+# For video testing, uncomment:
+#include "video_mpp.config"
+BR2_PACKAGE_RKMEDIA_RTSP_SERVER=y
+BR2_PACKAGE_RKMEDIA_RTSP_SERVER_H264=y
+
+# --- UVC AI-camera application stack (required by /oem/aicamera.sh + usb_config.sh) ---
+# eudev: dynamic /dev, /dev/block/by-name symlinks, and /etc/init.d/S10udev
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV=y
+# camera apps: uvc_app, dbserver, aiserver, ispserver (isp2-ipc), smart_display_service
+BR2_PACKAGE_UVC_APP=y
+BR2_PACKAGE_DBSERVER=y
+BR2_PACKAGE_AISERVER=y
+BR2_PACKAGE_AISERVER_SHM_SERVER=y
+BR2_PACKAGE_AISERVER_USE_ROCKX=y
+BR2_PACKAGE_ISP2_IPC=y
+BR2_PACKAGE_ISP2_IPC_DBUS=y
+BR2_PACKAGE_ISP2_IPC_DBSERVER=y
+# IPC libs isp2-ipc/apps depend on but don't select in Config.in (must be explicit)
+BR2_PACKAGE_LIBIPCPROTOCOL=y
+BR2_PACKAGE_CALLFUNIPC=y
+BR2_PACKAGE_SMART_DISPLAY_SERVICE=y
+# app support libs (auto-selected by aiserver/dbserver, pinned explicitly for robustness)
+BR2_PACKAGE_RKNPU=y
+BR2_PACKAGE_RKNPU_USE_RKNN_API=y
+# BR2_PACKAGE_RKNN_DEMO is not set
+BR2_PACKAGE_ROCKX=y
+BR2_PACKAGE_ROCKIT=y
+BR2_PACKAGE_LIBRKDB=y
+BR2_PACKAGE_LIBGDBUS=y
+BR2_PACKAGE_MINILOGGER=y
+BR2_PACKAGE_SHM_TOOLS=y
+# rkmedia media framework (main package + the sub-options the apps need)
+BR2_PACKAGE_RKMEDIA=y
+BR2_PACKAGE_RKMEDIA_RKNN=y
+BR2_PACKAGE_RKMEDIA_V4L2_CAPTURE=y
+BR2_PACKAGE_RKMEDIA_USE_AIQ=y
+BR2_PACKAGE_RKMEDIA_MPP=y
+BR2_PACKAGE_RKMEDIA_ALSA=y
+BR2_PACKAGE_RKMEDIA_ALSA_PLAYBACK=y
+BR2_PACKAGE_RKMEDIA_ALSA_CAPTURE=y
+BR2_PACKAGE_RKMEDIA_AUDIO_ALGORITHM=y
+BR2_PACKAGE_RKMEDIA_AUDIO_CODEC=y
+BR2_PACKAGE_RKMEDIA_AUDIO_ENCODER=y
+BR2_PACKAGE_RKMEDIA_AUDIO_DECODER=y
+BR2_PACKAGE_RKMEDIA_RKRGA=y
+BR2_PACKAGE_RKMEDIA_MOVE_DETECTION=y
+BR2_PACKAGE_RKMEDIA_OCCLUSION_DETECTION=y
+BR2_PACKAGE_RKMEDIA_LIVE555=y
+BR2_PACKAGE_OPENCV3=y
+BR2_PACKAGE_OPENCV3_LIB_PYTHON=y
+BR2_PACKAGE_OPENCV3_LIB_CALIB3D=y
+BR2_PACKAGE_OPENCV3_LIB_IMGCODECS=y
+BR2_PACKAGE_OPENCV3_WITH_JPEG=y
+BR2_PACKAGE_OPENCV3_WITH_PNG=y
+
+

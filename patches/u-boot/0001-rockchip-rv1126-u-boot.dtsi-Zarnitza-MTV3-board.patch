@@ -1,0 +1,752 @@
+From 4aba881dd6685a00a4d8af71a767f5389eb9f975 Mon Sep 17 00:00:00 2001
+From: Zarnitza MTV3 <mtv3-bsp@zarnitza>
+Date: Wed, 29 Jul 2026 11:14:27 +0300
+Subject: [PATCH] rockchip: rv1126-u-boot.dtsi: Zarnitza MTV3 board (RK809-2,
+ eMMC-first boot order, SPL nodes)
+
+Shared rv1126-u-boot.dtsi rewritten for the MTV3 board. NOTE: this is the generic include
+used by every rv1126 board in this tree; consider moving the MTV3-specific nodes into
+arch/arm/dts/rv1126-mtv3.dts.
+
+diff --git a/arch/arm/dts/rv1126-u-boot.dtsi b/arch/arm/dts/rv1126-u-boot.dtsi
+index 3da48d6..b146467 100644
+--- a/arch/arm/dts/rv1126-u-boot.dtsi
++++ b/arch/arm/dts/rv1126-u-boot.dtsi
+@@ -2,314 +2,561 @@
+  * (C) Copyright 2020 Rockchip Electronics Co., Ltd
+  *
+  * SPDX-License-Identifier:     GPL-2.0+
++ *
++ * MTV3 Board - RV1126 U-Boot Device Tree Include
++ * Customized for Zarnitza MTV3 board with RK809-2 PMIC
+  */
+ 
+ / {
+-	aliases {
+-		mmc0 = &emmc;
+-		mmc1 = &sdmmc;
+-	};
+-
+-	chosen {
+-		stdout-path = &uart2;
+-		u-boot,spl-boot-order = &sdmmc, &spi_nand, &spi_nor, &nandc, &emmc;
+-	};
+-
+-	secure_otp: secure_otp@0xff5d0000 {
+-		compatible = "rockchip,rv1126-secure-otp";
+-		reg = <0xff5d0000 0x4000>;
+-		secure_conf = <0xfe0a0008>;
+-	};
++    aliases {
++        mmc0 = &emmc;
++        mmc1 = &sdmmc;
++    };
++
++    chosen {
++        stdout-path = &uart2;
++        u-boot,spl-boot-order = &emmc, &sdmmc, &spi_nand, &spi_nor, &nandc ;
++    };
++
++    secure_otp: secure_otp@0xff5d0000 {
++        compatible = "rockchip,rv1126-secure-otp";
++        reg = <0xff5d0000 0x4000>;
++        secure_conf = <0xfe0a0008>;
++    };
++
++    /*
++     * Фиксированный регулятор - входное питание системы 5V
++     * Это физический вход питания платы от USB Type-C или внешнего источника
++     */
++    vcc5v0_sys: vcc5v0-sys {
++        compatible = "regulator-fixed";
++        regulator-name = "vcc5v0_sys";
++        regulator-always-on;
++        regulator-boot-on;
++        regulator-min-microvolt = <5000000>;
++        regulator-max-microvolt = <5000000>;
++        u-boot,dm-spl;
++        u-boot,dm-pre-reloc;
++    };
+ };
+ 
+ &psci {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    u-boot,dm-pre-reloc;
++    status = "okay";
+ };
+ 
+ &uart2 {
+-	clock-frequency = <24000000>;
+-	u-boot,dm-spl;
+-	/delete-property/ pinctrl-names;
+-	/delete-property/ pinctrl-0;
++    clock-frequency = <24000000>;
++    u-boot,dm-spl;
++    /delete-property/ pinctrl-names;
++    /delete-property/ pinctrl-0;
+ };
+ 
+ &sdmmc {
+-	u-boot,dm-spl;
+-	status = "okay";
++    u-boot,dm-spl;
++    status = "okay";
+ };
+ 
+ &sdmmc0 {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &sdmmc0_bus4 {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &sdmmc0_clk {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &sdmmc0_cmd {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &sdmmc0_det {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &emmc {
+-	mmc-ecsd = <0x0020f000>;
+ 	u-boot,dm-spl;
+-	/delete-property/ pinctrl-names;
+-	/delete-property/ pinctrl-0;
++    status = "okay";
++	no-1-8-v;
++	cap-mmc-highspeed;
++	bus-width = <8>;
++	non-removable;
++	max-frequency = <1500000>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&emmc_clk &emmc_cmd &emmc_bus8 &emmc_rstnout>;
+ };
+ 
++&emmc_clk     { u-boot,dm-spl; };
++&emmc_cmd     { u-boot,dm-spl; };
++&emmc_bus8    { u-boot,dm-spl; };
++&emmc_rstnout { u-boot,dm-spl; };
++
+ &pmu {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &pmugrf {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &pmucru {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &cru {
+-	u-boot,dm-spl;
+-	/delete-property/ assigned-clocks;
+-	/delete-property/ assigned-clock-rates;
+-	/delete-property/ assigned-clock-parents;
++    u-boot,dm-spl;
++    /delete-property/ assigned-clocks;
++    /delete-property/ assigned-clock-rates;
++    /delete-property/ assigned-clock-parents;
+ };
+ 
+ &crypto {
+-	u-boot,dm-spl;
+-	status = "okay";
++    u-boot,dm-spl;
++    status = "okay";
+ };
+ 
+ &grf {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &saradc {
+-	u-boot,dm-spl;
+-	status = "okay";
++    u-boot,dm-spl;
++    status = "okay";
+ };
+ 
+ &sfc {
+-	u-boot,dm-spl;
+-	/delete-property/ pinctrl-names;
+-	/delete-property/ pinctrl-0;
+-	/delete-property/ assigned-clocks;
+-	/delete-property/ assigned-clock-rates;
+-	status = "okay";
+-
+-	#address-cells = <1>;
+-	#size-cells = <0>;
+-	spi_nand: flash@0 {
+-		u-boot,dm-spl;
+-		compatible = "spi-nand";
+-		reg = <0>;
+-		spi-tx-bus-width = <1>;
+-		spi-rx-bus-width = <4>;
+-		spi-max-frequency = <96000000>;
+-	};
+-
+-	spi_nor: flash@1 {
+-		u-boot,dm-spl;
+-		compatible = "jedec,spi-nor";
+-		label = "sfc_nor";
+-		reg = <0>;
+-		spi-tx-bus-width = <1>;
+-		spi-rx-bus-width = <4>;
+-		spi-max-frequency = <100000000>;
+-	};
++    u-boot,dm-spl;
++    /delete-property/ pinctrl-names;
++    /delete-property/ pinctrl-0;
++    /delete-property/ assigned-clocks;
++    /delete-property/ assigned-clock-rates;
++    status = "okay";
++    #address-cells = <1>;
++    #size-cells = <0>;
++
++    spi_nand: flash@0 {
++        u-boot,dm-spl;
++        compatible = "spi-nand";
++        reg = <0>;
++        spi-tx-bus-width = <1>;
++        spi-rx-bus-width = <4>;
++        spi-max-frequency = <96000000>;
++    };
++
++    spi_nor: flash@1 {
++        u-boot,dm-spl;
++        compatible = "jedec,spi-nor";
++        label = "sfc_nor";
++        reg = <0>;
++        spi-tx-bus-width = <1>;
++        spi-rx-bus-width = <4>;
++        spi-max-frequency = <100000000>;
++    };
+ };
+ 
+ &nandc {
+-	u-boot,dm-spl;
+-	/delete-property/ pinctrl-names;
+-	/delete-property/ pinctrl-0;
+-	status = "okay";
+-	#address-cells = <1>;
+-	#size-cells = <0>;
+-
+-	nand@0 {
+-		u-boot,dm-spl;
+-		reg = <0>;
+-		nand-ecc-mode = "hw_syndrome";
+-		nand-ecc-strength = <16>;
+-		nand-ecc-step-size = <1024>;
+-	};
++    u-boot,dm-spl;
++    /delete-property/ pinctrl-names;
++    /delete-property/ pinctrl-0;
++    status = "okay";
++    #address-cells = <1>;
++    #size-cells = <0>;
++
++    nand@0 {
++        u-boot,dm-spl;
++        reg = <0>;
++        nand-ecc-mode = "hw_syndrome";
++        nand-ecc-strength = <16>;
++        nand-ecc-step-size = <1024>;
++    };
+ };
+ 
+ &hw_decompress {
+-	u-boot,dm-spl;
+-	status = "okay";
++    u-boot,dm-spl;
++    status = "okay";
+ };
+ 
+ &secure_otp {
+-	u-boot,dm-spl;
+-	status = "okay";
++    u-boot,dm-spl;
++    status = "okay";
+ };
+ 
++/*
++ * =============================================================================
++ * I2C0 и PMIC RK809-2 конфигурация для MTV3
++ * =============================================================================
++ *
++ * RK809-2 подключен к I2C0 на адресе 0x20
++ * Конфигурация регуляторов соответствует схеме MTV3:
++ * - BUCK1-4: основные DC-DC преобразователи
++ * - BUCK5: 3.3V для питания LDO5-LDO9
++ * - LDO1-9: линейные регуляторы
++ * - SWOUT1/2: переключаемые выходы
++ *
++ * ВАЖНО: SWOUT2 питает VCC_3V3 который идет на eMMC!
++ * Вход SWOUT2 (VCC8) подключен к BUCK4 (VCC3V3_SYS)
++ *
++ * ПРИМЕЧАНИЕ: vcc*-supply убраны чтобы избежать
++ * циклических зависимостей при инициализации драйвера.
++ */
+ &i2c0 {
+-	u-boot,dm-spl;
+-	status = "okay";
+-	rk817_fg@20 {
+-		u-boot,dm-spl;
+-		compatible = "rk817,battery";
+-		reg = <0x20>;
+-		bat_res_up = <140>;
+-		bat_res_down = <20>;
+-	};
++    u-boot,dm-spl;
++    u-boot,dm-pre-reloc;
++    status = "okay";
++
++    rk809: pmic@20 {
++        compatible = "rockchip,rk809";
++        reg = <0x20>;
++        u-boot,dm-spl;
++        u-boot,dm-pre-reloc;
++
++        regulators {
++            u-boot,dm-spl;
++            u-boot,dm-pre-reloc;
++
++            /*
++             * BUCK1: VDD_LOGIC - 0.8V
++             * Питание логики CPU RV1126
++             * Диапазон: 0.5V - 1.35V (для DVFS)
++             */
++            vdd_logic: DCDC_REG1 {
++                regulator-name = "vdd_logic";
++                regulator-always-on;
++                regulator-boot-on;
++                regulator-min-microvolt = <500000>;
++                regulator-max-microvolt = <1350000>;
++                regulator-init-microvolt = <800000>;
++                regulator-initial-mode = <0x2>;
++                regulator-ramp-delay = <6001>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * BUCK2: VDD_ARM - 0.8V
++             * Питание ядра CPU ARM Cortex-A7
++             * Диапазон: 0.5V - 1.35V (для DVFS)
++             */
++            vdd_arm: DCDC_REG2 {
++                regulator-name = "vdd_arm";
++                regulator-always-on;
++                regulator-boot-on;
++                regulator-min-microvolt = <500000>;
++                regulator-max-microvolt = <1350000>;
++                regulator-init-microvolt = <800000>;
++                regulator-initial-mode = <0x2>;
++                regulator-ramp-delay = <6001>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * BUCK3: VCC_DDR - 1.5V
++             * Питание DDR3 памяти
++             * Напряжение задается внешним резисторным делителем
++             */
++            vcc_ddr: DCDC_REG3 {
++                regulator-name = "vcc_ddr";
++                regulator-always-on;
++                regulator-boot-on;
++                regulator-initial-mode = <0x2>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * BUCK4: VCC3V3_SYS - 3.3V
++             * Основная системная шина 3.3V
++             * Питает: VCC8 (вход SWOUT2), периферию
++             */
++            vcc3v3_sys: DCDC_REG4 {
++                regulator-name = "vcc3v3_sys";
++                regulator-always-on;
++                regulator-boot-on;
++                regulator-min-microvolt = <3300000>;
++                regulator-max-microvolt = <3300000>;
++                regulator-init-microvolt = <3300000>;
++                regulator-initial-mode = <0x2>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * BUCK5: VCC_BUCK5 - 3.3V
++             * Питание для VCC5/VCC6 (входы LDO)
++             * Согласно схеме MTV3: 3.3V
++             */
++            vcc_buck5: DCDC_REG5 {
++                regulator-name = "vcc_buck5";
++                regulator-always-on;
++                regulator-boot-on;
++                regulator-min-microvolt = <3300000>;
++                regulator-max-microvolt = <3300000>;
++                regulator-init-microvolt = <3300000>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * LDO1: VCC0V8 - 0.8V
++             * PMUIO_VDD_0V8, MIPI, USB
++             */
++            vcc0v8: LDO_REG1 {
++                regulator-name = "vcc0v8";
++                regulator-always-on;
++                regulator-boot-on;
++                regulator-min-microvolt = <800000>;
++                regulator-max-microvolt = <800000>;
++                regulator-init-microvolt = <800000>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * LDO2: VCC1V8 - 1.8V
++             * PMUIO_VDD_1V8, ADC, MIPI, USB
++             */
++            vcc1v8: LDO_REG2 {
++                regulator-name = "vcc1v8";
++                regulator-always-on;
++                regulator-boot-on;
++                regulator-min-microvolt = <1800000>;
++                regulator-max-microvolt = <1800000>;
++                regulator-init-microvolt = <1800000>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * LDO3: VCC_0V8 - 0.8V
++             * PLL_AVDD_0V8, USB_AVDD_0V8
++             */
++            vcc_0v8: LDO_REG3 {
++                regulator-name = "vcc_0v8";
++                regulator-always-on;
++                regulator-boot-on;
++                regulator-min-microvolt = <800000>;
++                regulator-max-microvolt = <800000>;
++                regulator-init-microvolt = <800000>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * LDO4: VCC_1V8 - 1.8V
++             * PLL_AVDD_1V8, VCCIO3/4/6
++             */
++            vcc_1v8: LDO_REG4 {
++                regulator-name = "vcc_1v8";
++                regulator-always-on;
++                regulator-boot-on;
++                regulator-min-microvolt = <1800000>;
++                regulator-max-microvolt = <1800000>;
++                regulator-init-microvolt = <1800000>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * LDO5: VCC_DOVDD - 1.8V
++             * Camera Digital I/O
++             */
++            vcc_dovdd: LDO_REG5 {
++                regulator-name = "vcc_dovdd";
++                regulator-min-microvolt = <1800000>;
++                regulator-max-microvolt = <1800000>;
++                regulator-init-microvolt = <1800000>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * LDO6: VCC_DVDD - 1.5V
++             * Camera Digital Core
++             */
++            vcc_dvdd: LDO_REG6 {
++                regulator-name = "vcc_dvdd";
++                regulator-min-microvolt = <1500000>;
++                regulator-max-microvolt = <1500000>;
++                regulator-init-microvolt = <1500000>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * LDO7: VCC_AVDD - 3.0V
++             * Camera Analog
++             */
++            vcc_avdd: LDO_REG7 {
++                regulator-name = "vcc_avdd";
++                regulator-min-microvolt = <3000000>;
++                regulator-max-microvolt = <3000000>;
++                regulator-init-microvolt = <3000000>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * LDO8: VCCIO_SD - 3.3V
++             * SD Card IO (переключаемое 1.8V/3.3V)
++             */
++            vccio_sd: LDO_REG8 {
++                regulator-name = "vccio_sd";
++                regulator-min-microvolt = <1800000>;
++                regulator-max-microvolt = <3300000>;
++                regulator-init-microvolt = <3300000>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * LDO9: VCC3V3_SD - 3.3V
++             * SD Card Power
++             */
++            vcc3v3_sd: LDO_REG9 {
++                regulator-name = "vcc3v3_sd";
++                regulator-min-microvolt = <3300000>;
++                regulator-max-microvolt = <3300000>;
++                regulator-init-microvolt = <3300000>;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * SWITCH1: VCC5V0_HOST - 5V
++             * USB Host Power (OFF по умолчанию)
++             */
++            vcc5v0_host: SWITCH_REG1 {
++                regulator-name = "vcc5v0_host";
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++
++            /*
++             * SWITCH2: VCC_3V3 - ключ от VCC3V3_SYS
++             * КРИТИЧЕСКИ ВАЖНО: питает eMMC!
++             * Должен быть всегда включен
++             */
++            vcc_3v3: SWITCH_REG2 {
++                regulator-name = "vcc_3v3";
++                regulator-always-on;
++                regulator-boot-on;
++                u-boot,dm-spl;
++                u-boot,dm-pre-reloc;
++            };
++        };
++
++        /* Кодек RK809 - отключен в U-Boot */
++        codec {
++            status = "disabled";
++        };
++    };
+ };
+ 
+ &u2phy0 {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    u-boot,dm-pre-reloc;
++    status = "okay";
+ };
+ 
+ &u2phy_otg {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    u-boot,dm-pre-reloc;
++    status = "okay";
+ };
+ 
+ &usbdrd {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    u-boot,dm-pre-reloc;
++    status = "okay";
+ };
+ 
+ &usbdrd_dwc3 {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    u-boot,dm-pre-reloc;
++    status = "okay";
+ };
+ 
+ &pinctrl {
+-	u-boot,dm-spl;
+-	status = "okay";
++    u-boot,dm-spl;
++    status = "okay";
+ };
+ 
+ &gpio0 {
+-	u-boot,dm-spl;
+-	status = "okay";
++    u-boot,dm-spl;
++    status = "okay";
+ };
+ 
+ &gpio1 {
+-	u-boot,dm-spl;
+-	status = "okay";
++    u-boot,dm-spl;
++    status = "okay";
+ };
+ 
+ &pcfg_pull_up_drv_level_2 {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &pcfg_pull_none {
+-	u-boot,dm-spl;
++    u-boot,dm-spl;
+ };
+ 
+ &gpio3 {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    u-boot,dm-pre-reloc;
++    status = "okay";
+ };
+ 
++/* Ethernet - отключен для MTV3 в U-Boot */
+ &gmac {
+-	u-boot,dm-pre-reloc;
+-
+-	phy-mode = "rgmii";
+-	clock_in_out = "input";
+-
+-	snps,reset-gpio = <&gpio3 RK_PA0 GPIO_ACTIVE_LOW>;
+-	snps,reset-active-low;
+-	/* Reset time is 20ms, 100ms for rtl8211f */
+-	snps,reset-delays-us = <0 20000 100000>;
+-
+-	assigned-clocks = <&cru CLK_GMAC_SRC>, <&cru CLK_GMAC_TX_RX>, <&cru CLK_GMAC_ETHERNET_OUT>;
+-	assigned-clock-parents = <&cru CLK_GMAC_SRC_M1>, <&cru RGMII_MODE_CLK>;
+-	assigned-clock-rates = <125000000>, <0>, <25000000>;
+-
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&rgmiim1_pins &clk_out_ethernetm1_pins>;
+-
+-	tx_delay = <0x2a>;
+-	rx_delay = <0x1a>;
+-
+-	phy-handle = <&phy>;
+-	status = "okay";
++    status = "disabled";
+ };
+ 
+ &mdio {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
+-
+-	phy: phy@0 {
+-		compatible = "ethernet-phy-ieee802.3-c22";
+-		u-boot,dm-pre-reloc;
+-		reg = <0x0>;
+-		clocks = <&cru CLK_GMAC_ETHERNET_OUT>;
+-	};
++    status = "disabled";
+ };
+ 
+ &stmmac_axi_setup {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
+-	queue0 {
+-		u-boot,dm-pre-reloc;
+-	};
++    status = "disabled";
+ };
+ 
+ &mtl_rx_setup {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
+-	queue0 {
+-		u-boot,dm-pre-reloc;
+-	};
++    status = "disabled";
+ };
+ 
+ &mtl_tx_setup {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    status = "disabled";
+ };
+ 
+ &gmac_clkin_m0 {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    status = "disabled";
+ };
+ 
+ &gmac_clkini_m1 {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    status = "disabled";
+ };
+ 
+ &rgmiim1_pins {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    status = "disabled";
+ };
+ 
+-&rng {
+-	u-boot,dm-spl;
+-	status = "okay";
++&clk_out_ethernetm1_pins {
++    status = "disabled";
+ };
+ 
+-&clk_out_ethernetm1_pins{
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++&rng {
++    u-boot,dm-spl;
++    status = "okay";
+ };
+ 
+ &pcfg_pull_none {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    u-boot,dm-pre-reloc;
++    status = "okay";
+ };
+ 
+ &pcfg_pull_none_drv_level_12 {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    u-boot,dm-pre-reloc;
++    status = "okay";
+ };
+ 
+ &wdt {
+-	u-boot,dm-pre-reloc;
+-	status = "okay";
++    u-boot,dm-pre-reloc;
++    status = "okay";
+ };

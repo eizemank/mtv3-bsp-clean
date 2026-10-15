@@ -1,0 +1,45 @@
+From 98bcb5abb1342c64d0d37baecf4e402754dff1be Mon Sep 17 00:00:00 2001
+From: Zarnitza MTV3 <mtv3-bsp@zarnitza>
+Date: Wed, 29 Jul 2026 11:14:27 +0300
+Subject: [PATCH] media: rkispp: disable all clock gates on reset and set
+ nobig_en for small inputs
+
+- soft_reset: GATE_DIS_ALL instead of GATE_DIS_NR (NR/SHP/FEC blocks stalled on MTV3);
+- nr_config/nr_enable: explicitly set nobig_en=1 when the input is below
+  ISPP_NOBIG_OVERFLOW_SIZE (it was left uninitialised).
+
+diff --git a/drivers/media/platform/rockchip/ispp/hw.c b/drivers/media/platform/rockchip/ispp/hw.c
+index 42fc95a..2d58f6f 100644
+--- a/drivers/media/platform/rockchip/ispp/hw.c
++++ b/drivers/media/platform/rockchip/ispp/hw.c
+@@ -66,7 +66,7 @@ void rkispp_soft_reset(struct rkispp_hw_dev *hw)
+ 		BUS_ERR_NR | BUS_ERR_TNR | SCL2_INT | SCL1_INT |
+ 		SCL0_INT | FEC_INT | ORB_INT | SHP_INT | NR_INT | TNR_INT,
+ 		hw->base_addr + RKISPP_CTRL_INT_MSK);
+-	writel(GATE_DIS_NR, hw->base_addr + RKISPP_CTRL_CLKGATE);
++	writel(GATE_DIS_ALL, hw->base_addr + RKISPP_CTRL_CLKGATE);
+ }
+ 
+ /* using default value if reg no write for multi device */
+diff --git a/drivers/media/platform/rockchip/ispp/params.c b/drivers/media/platform/rockchip/ispp/params.c
+index a25fbd1..fa41ced 100644
+--- a/drivers/media/platform/rockchip/ispp/params.c
++++ b/drivers/media/platform/rockchip/ispp/params.c
+@@ -318,6 +318,8 @@ static void nr_config(struct rkispp_params_vdev *params_vdev,
+ 	if (get_input_size(params_vdev) > ISPP_NOBIG_OVERFLOW_SIZE) {
+ 		big_en = 1;
+ 		nobig_en = 0;
++	} else {
++		nobig_en = 1;
+ 	}
+ 
+ 	if (params_vdev->dev->hw_dev->dev_num == 1)
+@@ -342,6 +344,8 @@ static void nr_enable(struct rkispp_params_vdev *params_vdev, bool en,
+ 	if (get_input_size(params_vdev) > ISPP_NOBIG_OVERFLOW_SIZE) {
+ 		big_en = 1;
+ 		nobig_en = 0;
++	} else {
++		nobig_en = 1;
+ 	}
+ 
+ 	val = arg->uvnr_step1_en << 1 | arg->uvnr_step2_en << 2 |

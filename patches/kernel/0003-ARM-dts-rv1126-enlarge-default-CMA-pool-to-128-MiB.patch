@@ -1,0 +1,20 @@
+From b7569f9255e2165eb5ba226deb9e25656f3cdf9d Mon Sep 17 00:00:00 2001
+From: Zarnitza MTV3 <mtv3-bsp@zarnitza>
+Date: Wed, 29 Jul 2026 11:14:27 +0300
+Subject: [PATCH] ARM: dts: rv1126: enlarge default CMA pool to 128 MiB
+
+ISP/ISPP/NPU buffers for the MTV3 camera pipeline do not fit in the stock 8 MiB CMA pool.
+
+diff --git a/arch/arm/boot/dts/rv1126.dtsi b/arch/arm/boot/dts/rv1126.dtsi
+index f5f0a07..e4984ea 100644
+--- a/arch/arm/boot/dts/rv1126.dtsi
++++ b/arch/arm/boot/dts/rv1126.dtsi
+@@ -366,7 +366,7 @@
+ 			compatible = "shared-dma-pool";
+ 			inactive;
+ 			reusable;
+-			size = <0x800000>;
++			size = <0x8000000>;
+ 			linux,cma-default;
+ 		};
+ 

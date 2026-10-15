@@ -1,0 +1,39 @@
+From 149c71d748a19a41103c169e3ac1d7f58c931709 Mon Sep 17 00:00:00 2001
+From: Zarnitza MTV3 <mtv3-bsp@zarnitza>
+Date: Wed, 29 Jul 2026 11:14:27 +0300
+Subject: [PATCH] media: i2c: ov13850: HDR cfg ioctls and relaxed
+ enum_frame_interval
+
+- handle RKMODULE_GET_HDR_CFG (report NO_HDR) and RKMODULE_SET_HDR_CFG (no-op)
+  so rkisp/rkaiq can query the sensor instead of failing with -ENOIOCTLCMD;
+- enum_frame_interval: force code to SBGGR10_1X10 instead of rejecting other codes.
+MTV3 uses two OV13850 on i2c1 (0x10 / 0x36).
+
+diff --git a/drivers/media/i2c/ov13850.c b/drivers/media/i2c/ov13850.c
+index 49df051..c5f6cef 100644
+--- a/drivers/media/i2c/ov13850.c
++++ b/drivers/media/i2c/ov13850.c
+@@ -944,6 +944,13 @@ static long ov13850_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
+ 				 OV13850_REG_VALUE_08BIT,
+ 				 OV13850_MODE_SW_STANDBY);
+ 		break;
++	case RKMODULE_GET_HDR_CFG: {
++		struct rkmodule_hdr_cfg *hdr = (struct rkmodule_hdr_cfg *)arg;
++		hdr->hdr_mode = NO_HDR;
++		break;
++	}
++	case RKMODULE_SET_HDR_CFG:
++		break;
+ 	default:
+ 		ret = -ENOIOCTLCMD;
+ 		break;
+@@ -1238,8 +1245,7 @@ static int ov13850_enum_frame_interval(struct v4l2_subdev *sd,
+ 	if (fie->index >= ARRAY_SIZE(supported_modes))
+ 		return -EINVAL;
+ 
+-	if (fie->code != MEDIA_BUS_FMT_SBGGR10_1X10)
+-		return -EINVAL;
++	fie->code = MEDIA_BUS_FMT_SBGGR10_1X10;
+ 
+ 	fie->width = supported_modes[fie->index].width;
+ 	fie->height = supported_modes[fie->index].height;
