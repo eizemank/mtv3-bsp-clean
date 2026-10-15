@@ -148,4 +148,6 @@ BR2_PACKAGE_OPENCV3_LIB_IMGCODECS=y
 BR2_PACKAGE_OPENCV3_WITH_JPEG=y
 BR2_PACKAGE_OPENCV3_WITH_PNG=y
 
-
+# --- mtv3-vision в rootfs: S60mtv3, скрипты board/mtv3-rv1126, mtv3_cam_daemon, /opt/seesharp/mainCV ---
+# build/post.sh — штатный скрипт Rockchip из base.config, его нужно сохранить в списке.
+BR2_ROOTFS_POST_BUILD_SCRIPT="build/post.sh board/mtv3/rv1126/post-build.sh"

@@ -46,6 +46,20 @@ UVC-стек в buildroot-defconfig, OEM-базы `sysconfig*`.
 | `u-boot/0002-rockchip-rv1126.dtsi-emmc-drop-use-v2-tuning` | eMMC без `rockchip,use-v2-tuning` |
 | `buildroot/0001-package-opencv3-build-opencv_contrib-aruco-module` | opencv_contrib aruco для opencv3 3.3.0 (= `opencv3-aruco.mk.add` из mtv3-vision) |
 
+### Интеграция mtv3-vision (добавлено 15.10.2026)
+
+* `overlay/buildroot/board/mtv3/rv1126/post-build.sh` + в defconfig
+  `BR2_ROOTFS_POST_BUILD_SCRIPT="build/post.sh board/mtv3/rv1126/post-build.sh"` (штатный
+  `build/post.sh` из `base.config` сохранён). Скрипт кладёт в rootfs `S60mtv3`, `init_mp.sh`,
+  `mtv3_network.sh`, `mtv3_usb_gadget.sh`, `mtv3_cam_daemon` и `/opt/seesharp/{mainCV,config.json,
+  модели}` из `$MTV3_REPO` (в контейнере `/work/mtv3-vision`). Бинарники берутся из
+  `cpp/SeeSharp/build-rv1126` и `board/mtv3-rv1126`; если их ещё нет — предупреждение, rootfs
+  собирается без них (первая сборка rootfs всегда раньше mainCV).
+* `rv1126_mtv3_defconfig`: `CONFIG_USB_CONFIGFS_ACM=y` — без него `mtv3_usb_gadget.sh` не
+  создаёт `/dev/ttyGS0` и завершается ошибкой (RNDIS и FunctionFS в defconfig уже были).
+
+Полный цикл «SDK → прошивка → ADB → SeeSharp → веб-интерфейс»: `mtv3-vision/docs/MTV3_FROM_SCRATCH_RU.md`.
+
 ## review/ — относится к MTV3, решить отдельно (по умолчанию не применяется)
 
 | Патч | Почему под вопросом |
